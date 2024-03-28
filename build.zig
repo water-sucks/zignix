@@ -8,6 +8,14 @@ pub fn build(b: *std.Build) void {
         .source_file = .{ .path = "src/lib.zig" },
     });
 
+    const lib = b.addStaticLibrary(.{
+        .name = "zignix",
+        .root_source_file = .{ .path = "src/lib.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(lib);
+
     const tests = b.addTest(.{
         .root_source_file = .{ .path = "src/lib.zig" },
         .target = target,
