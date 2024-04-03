@@ -104,6 +104,11 @@ pub const Value = struct {
         return result;
     }
 
+    pub fn setInt(self: Self, context: NixContext, value: i64) !void {
+        const err = libnix.nix_set_int(context.context, self.value, value);
+        if (err != 0) return nixError(err);
+    }
+
     /// Get a 64-bit floating-point value.
     pub fn float(self: Self, context: NixContext) !f64 {
         const result = libnix.nix_get_float(context.context, self.value);
@@ -111,11 +116,21 @@ pub const Value = struct {
         return result;
     }
 
+    pub fn setFloat(self: Self, context: NixContext, value: f64) !void {
+        const err = libnix.nix_set_float(context.context, self.value, value);
+        if (err != 0) return nixError(err);
+    }
+
     /// Get a boolean value.
     pub fn boolean(self: Self, context: NixContext) !bool {
         const result = libnix.nix_get_bool(context.context, self.value);
         try context.errorCode();
         return result;
+    }
+
+    pub fn setBoolean(self: Self, context: NixContext, value: bool) !void {
+        const err = libnix.nix_set_bool(context.context, self.value, value);
+        if (err != 0) return nixError(err);
     }
 
     /// Get a string value. Caller owns returned memory.
@@ -128,6 +143,11 @@ pub const Value = struct {
         unreachable;
     }
 
+    pub fn setString(self: Self, context: NixContext, value: [:0]const u8) !void {
+        const err = libnix.nix_set_string(context.context, self.value, value);
+        if (err != 0) return nixError(err);
+    }
+
     /// Get a path value as a string. Caller owns returned memory.
     pub fn pathString(self: Self, allocator: Allocator, context: NixContext) ![]const u8 {
         const result = libnix.nix_get_path_string(context.context, self.value);
@@ -136,6 +156,17 @@ pub const Value = struct {
         }
         try context.errorCode();
         unreachable;
+    }
+
+    pub fn setPath(self: Self, context: NixContext, value: [:0]const u8) !void {
+        // FIXME: setting a path hangs for some reason.
+        const err = libnix.nix_set_path_string(context.context, self.value, value);
+        if (err != 0) return nixError(err);
+    }
+
+    pub fn setNull(self: Self, context: NixContext) !void {
+        const err = libnix.nix_set_null(context.context, self.value);
+        if (err != 0) return nixError(err);
     }
 
     /// Get the length of a list.
@@ -160,8 +191,8 @@ pub const Value = struct {
     }
 
     /// Get the type of this value.
-    pub fn valueType(self: Self, context: NixContext) ValueType {
-        const result = libnix.nix_get_type(context.context, self.value);
+    pub fn valueType(self: Self) ValueType {
+        const result = libnix.nix_get_type(null, self.value);
         return @enumFromInt(result);
     }
 
@@ -171,40 +202,6 @@ pub const Value = struct {
         const result = libnix.nix_get_typename(context.context, self.value);
         try context.errorCode();
         return mem.sliceTo(result, 0);
-    }
-
-    /// Set a value. Accepted types are:
-    ///  - int
-    ///  - float
-    ///  - bool
-    ///  - string
-    ///  - path
-    ///  - null
-    ///  - list
-    ///
-    /// This function takes a sentinel-terminated slice, rather than
-    /// a normal slice, in order to avoid passing in an allocator.
-    /// Lists are not type-checked for their value.
-    pub fn set(self: Self, comptime T: ValueType, context: NixContext, value: (switch (T) {
-        .int => i64,
-        .float => f64,
-        .bool => bool,
-        .string, .path => [:0]const u8,
-        .null => @TypeOf(null),
-        .list => Value,
-        else => @compileError("type '" ++ @tagName(T) ++ "' cannot be used for the set method"),
-    })) !void {
-        const err = switch (T) {
-            .int => libnix.nix_set_int(context.context, self.value, value),
-            .float => libnix.nix_set_float(context.context, self.value, value),
-            .bool => libnix.nix_set_bool(context.context, self.value, value),
-            .string => libnix.nix_set_string(context.context, self.value, value),
-            // TODO: setting a path hangs for some reason.
-            .path => libnix.nix_set_path_string(context.context, self.value, value),
-            .null => libnix.nix_set_null(context.context, self.value),
-            else => @panic("value cannot be of type " ++ @typeName(@TypeOf(value))),
-        };
-        if (err != 0) return nixError(err);
     }
 
     /// Manipulate a list by index. Don't do this mid-computation.
