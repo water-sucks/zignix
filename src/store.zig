@@ -90,10 +90,9 @@ pub const Store = struct {
         };
     }
 
-    /// Unref this Nix store. Does not fail; it'll be closed and
-    /// deallocated when all references are gone.
-    pub fn unref(self: Self) void {
-        libnix.nix_store_unref(self.store);
+    /// Deallocate this Nix store. Does not fail.
+    pub fn deinit(self: Self) void {
+        libnix.nix_store_free(self.store);
     }
 };
 
@@ -117,7 +116,7 @@ pub const StorePath = struct {
         user_data: ?*anyopaque,
         callback: *const fn (user_data: ?*anyopaque, out_name: [*c]const u8, out: [*c]const u8) callconv(.C) void,
     ) NixError!void {
-        const err = libnix.nix_store_build(context.context, self.store, self.path, user_data, callback);
+        const err = libnix.nix_store_realise(context.context, self.store, self.path, user_data, callback);
         if (err != 0) return nixError(err);
     }
 

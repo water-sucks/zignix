@@ -22,7 +22,7 @@ pub fn init(context: NixContext) NixError!void {
 }
 
 pub const EvalState = struct {
-    state: *libnix.State,
+    state: *libnix.EvalState,
     store: *libnix.Store,
 
     const Self = @This();
@@ -93,7 +93,7 @@ pub const ValueType = enum(u8) {
 // TODO: find out why asserts are segfaulting instead of returning error info?
 pub const Value = struct {
     value: *libnix.Value,
-    state: *libnix.State,
+    state: *libnix.EvalState,
 
     const Self = @This();
 
@@ -105,19 +105,19 @@ pub const Value = struct {
     }
 
     pub fn setInt(self: Self, context: NixContext, value: i64) !void {
-        const err = libnix.nix_set_int(context.context, self.value, value);
+        const err = libnix.nix_init_int(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
     /// Get a 64-bit floating-point value.
     pub fn float(self: Self, context: NixContext) !f64 {
-        const result = libnix.nix_get_float(context.context, self.value);
+        const result = libnix.nix_init_float(context.context, self.value);
         try context.errorCode();
         return result;
     }
 
     pub fn setFloat(self: Self, context: NixContext, value: f64) !void {
-        const err = libnix.nix_set_float(context.context, self.value, value);
+        const err = libnix.nix_init_float(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
@@ -129,7 +129,7 @@ pub const Value = struct {
     }
 
     pub fn setBoolean(self: Self, context: NixContext, value: bool) !void {
-        const err = libnix.nix_set_bool(context.context, self.value, value);
+        const err = libnix.nix_init_bool(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
@@ -144,7 +144,7 @@ pub const Value = struct {
     }
 
     pub fn setString(self: Self, context: NixContext, value: [:0]const u8) !void {
-        const err = libnix.nix_set_string(context.context, self.value, value);
+        const err = libnix.nix_init_string(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
@@ -160,12 +160,12 @@ pub const Value = struct {
 
     pub fn setPath(self: Self, context: NixContext, value: [:0]const u8) !void {
         // FIXME: setting a path hangs for some reason.
-        const err = libnix.nix_set_path_string(context.context, self.value, value);
+        const err = libnix.nix_init_path_string(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
     pub fn setNull(self: Self, context: NixContext) !void {
-        const err = libnix.nix_set_null(context.context, self.value);
+        const err = libnix.nix_init_null(context.context, self.value);
         if (err != 0) return nixError(err);
     }
 
@@ -202,12 +202,6 @@ pub const Value = struct {
         const result = libnix.nix_get_typename(context.context, self.value);
         try context.errorCode();
         return mem.sliceTo(result, 0);
-    }
-
-    /// Manipulate a list by index. Don't do this mid-computation.
-    pub fn setListIndex(self: Self, context: NixContext, index: usize, value: Value) !void {
-        const err = libnix.nix_set_list_byidx(context.context, self.value, @intCast(index), value.value);
-        if (err != 0) return nixError(err);
     }
 
     /// Copy the value from another value into this value.
