@@ -210,6 +210,12 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
+    /// Copy the value from another value into this value.
+    pub fn copy(self: Self, context: NixContext, src: Value) !void {
+        const err = libnix.nix_copy_value(context.context, self.value, src.value);
+        if (err != 0) return nixError(err);
+    }
+
     // TODO: make a toOwnedSlice method for stringifying a value.
 };
 
