@@ -175,6 +175,12 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
+    /// Set a list value from a list builder.
+    pub fn setList(self: Self, context: NixContext, builder: ListBuilder) !void {
+        const err = libnix.nix_make_list(context.context, builder.builder, self.value);
+        if (err != 0) return nixError(err);
+    }
+
     /// Get the length of a list.
     pub fn listSize(self: Self, context: NixContext) !usize {
         const result = libnix.nix_get_list_size(context.context, self.value);
@@ -246,6 +252,35 @@ pub const gc = struct {
             // TODO: are there any more value types to handle?
             @compileError("value to increment GC refcount on must be a valid GC-able type");
         }
+    }
+};
+
+pub const ListBuilder = struct {
+    state: *libnix.EvalState,
+    builder: *libnix.ListBuilder,
+
+    const Self = @This();
+
+    pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
+        var builder = libnix.nix_make_list_builder(context.context, state.state, capacity);
+        if (builder == null) {
+            try context.errorCode();
+            return error.OutOfMemory;
+        }
+
+        return Self{
+            .state = state.state,
+            .builder = builder.?,
+        };
+    }
+
+    pub fn insert(self: Self, context: NixContext, index: c_uint, value: Value) NixError!void {
+        const err = libnix.nix_list_builder_insert(context.context, self.builder, index, value.value);
+        if (err != 0) return nixError(err);
+    }
+
+    pub fn deinit(self: Self) void {
+        libnix.nix_list_builder_free(self.builder);
     }
 };
 
@@ -339,3 +374,53 @@ test "set null" {
     try value.setNull(context);
     try expect(value.valueType() == .null);
 }
+
+test "build/set list value" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.createValue(context);
+
+    const builder = try ListBuilder.init(context, state, 10);
+    defer builder.deinit();
+
+    for (0..10) |i| {
+        const lvalue = try state.createValue(context);
+        try lvalue.setInt(context, @intCast(i));
+        try builder.insert(context, @intCast(i), lvalue);
+    }
+
+    try value.setList(context, builder);
+    try expect(value.valueType() == .list);
+}
+
+// pub const ListBuilder = struct {
+//     state: *libnix.EvalState,
+//     builder: *libnix.ListBuilder,
+//
+//     const Self = @This();
+//
+//     pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
+//         var builder = libnix.nix_make_list_builder(context.context, state.state, capacity);
+//         if (builder == null) {
+//             try context.errorCode();
+//             return error.OutOfMemory;
+//         }
+//
+//         return Self{
+//             .state = state.state,
+//             .builder = builder.?,
+//         };
+//     }
+//
+//     pub fn insert(self: Self, context: NixContext, index: usize, value: Value) NixError!void {
+//         const err = try libnix.nix_list_builder_insert(context.context, self.builder, index, value.value);
+//         if (err != 0) return nixError(err);
+//     }
+//
+//     pub fn deinit(self: Self) void {
+//         libnix.nix_list_builder_free(self.builder);
+//     }
+// };
