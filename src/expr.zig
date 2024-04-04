@@ -202,6 +202,16 @@ pub const Value = struct {
         unreachable;
     }
 
+    /// Return a list iterator.
+    pub fn listIterator(self: Self, context: NixContext) !ListIterator {
+        const size = try self.listSize(context);
+
+        return ListIterator{
+            .list = self,
+            .size = size,
+        };
+    }
+
     /// Get the type of this value.
     pub fn valueType(self: Self) ValueType {
         const result = libnix.nix_get_type(null, self.value);
@@ -281,6 +291,27 @@ pub const ListBuilder = struct {
 
     pub fn deinit(self: Self) void {
         libnix.nix_list_builder_free(self.builder);
+    }
+};
+
+pub const ListIterator = struct {
+    list: Value,
+    size: usize,
+    index: usize = 0,
+
+    const Self = @This();
+
+    /// Return the next element in the list as a `Value` if it exists.
+    /// Clean this value up using `gc.decRef`.
+    pub fn next(self: *Self, context: NixContext) !?Value {
+        if (self.index == self.size) {
+            return null;
+        }
+
+        const current_index = self.index;
+        self.index += 1;
+
+        return try self.list.listAtIndex(context, current_index);
     }
 };
 
@@ -396,31 +427,31 @@ test "build/set list value" {
     try expect(value.valueType() == .list);
 }
 
-// pub const ListBuilder = struct {
-//     state: *libnix.EvalState,
-//     builder: *libnix.ListBuilder,
-//
-//     const Self = @This();
-//
-//     pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
-//         var builder = libnix.nix_make_list_builder(context.context, state.state, capacity);
-//         if (builder == null) {
-//             try context.errorCode();
-//             return error.OutOfMemory;
-//         }
-//
-//         return Self{
-//             .state = state.state,
-//             .builder = builder.?,
-//         };
-//     }
-//
-//     pub fn insert(self: Self, context: NixContext, index: usize, value: Value) NixError!void {
-//         const err = try libnix.nix_list_builder_insert(context.context, self.builder, index, value.value);
-//         if (err != 0) return nixError(err);
-//     }
-//
-//     pub fn deinit(self: Self) void {
-//         libnix.nix_list_builder_free(self.builder);
-//     }
-// };
+test "iterate through list" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const listValue = try state.createValue(context);
+
+    const builder = try ListBuilder.init(context, state, 10);
+    defer builder.deinit();
+
+    for (0..10) |i| {
+        const lvalue = try state.createValue(context);
+        try lvalue.setInt(context, @intCast(i));
+        try builder.insert(context, @intCast(i), lvalue);
+    }
+
+    try listValue.setList(context, builder);
+
+    var expected_value: i64 = 0;
+    var iter = try listValue.listIterator(context);
+    while (try iter.next(context)) |value| {
+        defer gc.decRef(Value, context, value) catch unreachable;
+        const actual = try value.int(context);
+        try expectEqual(expected_value, actual);
+        expected_value += 1;
+    }
+}
