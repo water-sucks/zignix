@@ -1,6 +1,10 @@
 const std = @import("std");
 const mem = std.mem;
+const testing = std.testing;
 const Allocator = mem.Allocator;
+const expect = testing.expect;
+const expectEqual = testing.expectEqual;
+const expectEqualSlices = testing.expectEqualSlices;
 
 const errors = @import("./error.zig");
 const nixError = errors.nixError;
@@ -13,6 +17,8 @@ const lstore = @import("./store.zig");
 const Store = lstore.Store;
 
 const libnix = @import("./c.zig").libnix;
+
+const TestUtils = @import("testing.zig").TestUtils;
 
 /// Initialize the Nix expression evaluator. Call this function
 /// before creating any `State`s; it can be called multiple times.
@@ -111,7 +117,7 @@ pub const Value = struct {
 
     /// Get a 64-bit floating-point value.
     pub fn float(self: Self, context: NixContext) !f64 {
-        const result = libnix.nix_init_float(context.context, self.value);
+        const result = libnix.nix_get_float(context.context, self.value);
         try context.errorCode();
         return result;
     }
@@ -242,3 +248,94 @@ pub const gc = struct {
         }
     }
 };
+
+test "get/set integer" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.createValue(context);
+    try value.setInt(context, 10);
+
+    const actual = try value.int(context);
+    const expected: i64 = 10;
+
+    try expectEqual(expected, actual);
+}
+
+test "get/set float" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.createValue(context);
+    try value.setFloat(context, 3.14);
+
+    const actual = try value.float(context);
+    const expected: f64 = 3.14;
+
+    try expectEqual(expected, actual);
+}
+
+test "get/set bool" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.createValue(context);
+    try value.setBoolean(context, false);
+
+    const actual = try value.boolean(context);
+    const expected: bool = false;
+
+    try expectEqual(expected, actual);
+}
+
+test "get/set string slice" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.createValue(context);
+    try value.setString(context, "Goodbye, cruel world!");
+
+    const actual = try value.string(allocator, context);
+    defer allocator.free(actual);
+    const expected: []const u8 = "Goodbye, cruel world!";
+
+    try expectEqualSlices(u8, expected, actual);
+}
+
+// This test does not work, due to setting a path hanging.
+// test "get/set path string slice" {
+//     const allocator = testing.allocator;
+//     const resources = try TestUtils.initResources(allocator);
+//     const context = resources.context;
+//     const state = resources.state;
+//
+//     const value = try state.createValue(context);
+//     try value.setStringPath(context, "/nix/store");
+//
+//     const actual = try value.pathString(allocator, context);
+//     defer allocator.free(actual);
+//     const expected: []const u8 = "/nix/store";
+//
+//     try expectEqualSlices(u8, expected, actual);
+// }
+
+test "set null" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.createValue(context);
+    try value.setString(context, "Goodbye, cruel world!");
+
+    try value.setNull(context);
+    try expect(value.valueType() == .null);
+}

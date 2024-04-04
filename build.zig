@@ -28,6 +28,11 @@ pub fn build(b: *std.Build) void {
     });
     const test_artifact = b.addRunArtifact(tests);
 
+    tests.linkLibC();
+    tests.linkSystemLibrary("nixexprc");
+    tests.linkSystemLibrary("nixstorec");
+    tests.linkSystemLibrary("nixutilc");
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&test_artifact.step);
 }
