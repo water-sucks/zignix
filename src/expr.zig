@@ -139,11 +139,11 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
-    /// Get a string value. Caller owns returned memory.
-    pub fn string(self: Self, allocator: Allocator, context: NixContext) ![]const u8 {
+    /// Get a string value. Caller does not own returned memory.
+    pub fn string(self: Self, context: NixContext) ![]const u8 {
         const result = libnix.nix_get_string(context.context, self.value);
         if (result) |value| {
-            return allocator.dupe(u8, mem.sliceTo(value, 0));
+            return mem.sliceTo(mem.span(value), 0);
         }
         try context.errorCode();
         unreachable;
@@ -154,11 +154,11 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
-    /// Get a path value as a string. Caller owns returned memory.
-    pub fn pathString(self: Self, allocator: Allocator, context: NixContext) ![]const u8 {
+    /// Get a path value as a string. Caller does not own returned memory.
+    pub fn pathString(self: Self, context: NixContext) ![]const u8 {
         const result = libnix.nix_get_path_string(context.context, self.value);
         if (result) |value| {
-            return allocator.dupe(u8, mem.sliceTo(value, 0));
+            return mem.sliceTo(mem.span(value), 0);
         }
         try context.errorCode();
         unreachable;
