@@ -1,4 +1,5 @@
 const std = @import("std");
+const fmt = std.fmt;
 const mem = std.mem;
 const testing = std.testing;
 const Allocator = mem.Allocator;
@@ -102,6 +103,11 @@ pub const Value = struct {
     state: *libnix.EvalState,
 
     const Self = @This();
+
+    const AttrKeyValue = struct {
+        name: []const u8,
+        value: Value,
+    };
 
     /// Get a 64-bit integer value.
     pub fn int(self: Self, context: NixContext) !i64 {
@@ -212,6 +218,73 @@ pub const Value = struct {
         };
     }
 
+    /// Set an attrset value from a attrset bindings builder.
+    pub fn setAttrs(self: Self, context: NixContext, builder: BindingsBuilder) !void {
+        const err = libnix.nix_make_attrs(context.context, self.value, builder.builder);
+        if (err != 0) return nixError(err);
+    }
+
+    /// Retrieve the element count of an attrset.
+    pub fn attrsetSize(self: Self, context: NixContext) !usize {
+        const result = libnix.nix_get_attrs_size(context.context, self.value);
+        try context.errorCode();
+        return result;
+    }
+
+    /// Retrieve a key-value pair from the sorted bindings by index.
+    /// Caller does not own `.name`, and must call `gc.decRef` on `.value`
+    /// to release the created value.
+    pub fn attrAtIndex(self: Self, context: NixContext, i: usize) !AttrKeyValue {
+        var buf: [*c]u8 = undefined;
+        const result = libnix.nix_get_attr_byidx(context.context, self.value, self.state, @intCast(i), &buf);
+        if (result) |value| {
+            return AttrKeyValue{
+                .name = mem.sliceTo(mem.span(buf), 0),
+                .value = Value{
+                    .state = self.state,
+                    .value = value,
+                },
+            };
+        }
+
+        try context.errorCode();
+        unreachable;
+    }
+
+    /// Retrieve an attr value by name. Call `gc.decRef` to release the
+    /// created value.
+    pub fn attrByName(self: Self, context: NixContext, name: [:0]const u8) !Value {
+        const result = libnix.nix_get_attr_byname(context.context, self.value, self.state, name);
+        if (result) |value| {
+            return Value{
+                .state = self.state,
+                .value = value,
+            };
+        }
+
+        try context.errorCode();
+        unreachable;
+    }
+
+    /// Retrieve an attr name by index in the sorted bindings. Avoids
+    /// evaluation of the value; caller does not own returned memory.
+    pub fn attrNameAtIndex(self: Self, context: NixContext, i: usize) ![]const u8 {
+        const result = libnix.nix_get_attr_name_byidx(context.context, self.value, self.state, @intCast(i));
+        if (result) |value| {
+            return mem.sliceTo(mem.span(value), 0);
+        }
+
+        try context.errorCode();
+        unreachable;
+    }
+
+    /// Check if an attr with the provided name exists in this attrset.
+    pub fn hasAttrWithName(self: Self, context: NixContext, name: [:0]const u8) !bool {
+        const exists = libnix.nix_has_attr_byname(context.context, self.value, self.state, name);
+        try context.errorCode();
+        return exists;
+    }
+
     /// Get the type of this value.
     pub fn valueType(self: Self) ValueType {
         const result = libnix.nix_get_type(null, self.value);
@@ -219,7 +292,7 @@ pub const Value = struct {
     }
 
     /// Get the type name of this value as defined in the evaluator.
-    /// Caller owns returned memory.
+    /// Caller does not own returned memory.
     pub fn typeName(self: Self, context: NixContext) ![]const u8 {
         const result = libnix.nix_get_typename(context.context, self.value);
         try context.errorCode();
@@ -291,6 +364,35 @@ pub const ListBuilder = struct {
 
     pub fn deinit(self: Self) void {
         libnix.nix_list_builder_free(self.builder);
+    }
+};
+
+pub const BindingsBuilder = struct {
+    state: *libnix.EvalState,
+    builder: *libnix.BindingsBuilder,
+
+    const Self = @This();
+
+    pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
+        var builder = libnix.nix_make_bindings_builder(context.context, state.state, capacity);
+        if (builder == null) {
+            try context.errorCode();
+            return error.outOfMemory;
+        }
+
+        return Self{
+            .state = state.state,
+            .builder = builder.?,
+        };
+    }
+
+    pub fn insert(self: Self, context: NixContext, name: [:0]const u8, value: Value) NixError!void {
+        const err = libnix.nix_bindings_builder_insert(context.context, self.builder, name, value.value);
+        if (err != 0) return nixError(err);
+    }
+
+    pub fn deinit(self: Self) void {
+        libnix.nix_bindings_builder_free(self.builder);
     }
 };
 
@@ -369,8 +471,7 @@ test "get/set string slice" {
     const value = try state.createValue(context);
     try value.setString(context, "Goodbye, cruel world!");
 
-    const actual = try value.string(allocator, context);
-    defer allocator.free(actual);
+    const actual = try value.string(context);
     const expected: []const u8 = "Goodbye, cruel world!";
 
     try expectEqualSlices(u8, expected, actual);
@@ -387,7 +488,6 @@ test "get/set string slice" {
 //     try value.setStringPath(context, "/nix/store");
 //
 //     const actual = try value.pathString(allocator, context);
-//     defer allocator.free(actual);
 //     const expected: []const u8 = "/nix/store";
 //
 //     try expectEqualSlices(u8, expected, actual);
@@ -412,19 +512,11 @@ test "build/set list value" {
     const context = resources.context;
     const state = resources.state;
 
-    const value = try state.createValue(context);
+    const value = try TestUtils.createList(context, state);
 
-    const builder = try ListBuilder.init(context, state, 10);
-    defer builder.deinit();
-
-    for (0..10) |i| {
-        const lvalue = try state.createValue(context);
-        try lvalue.setInt(context, @intCast(i));
-        try builder.insert(context, @intCast(i), lvalue);
-    }
-
-    try value.setList(context, builder);
     try expect(value.valueType() == .list);
+    const expected_size: usize = 10;
+    try expectEqual(expected_size, try value.listSize(context));
 }
 
 test "iterate through list" {
@@ -433,25 +525,84 @@ test "iterate through list" {
     const context = resources.context;
     const state = resources.state;
 
-    const listValue = try state.createValue(context);
-
-    const builder = try ListBuilder.init(context, state, 10);
-    defer builder.deinit();
-
-    for (0..10) |i| {
-        const lvalue = try state.createValue(context);
-        try lvalue.setInt(context, @intCast(i));
-        try builder.insert(context, @intCast(i), lvalue);
-    }
-
-    try listValue.setList(context, builder);
+    const list_value = try TestUtils.createList(context, state);
 
     var expected_value: i64 = 0;
-    var iter = try listValue.listIterator(context);
+    var iter = try list_value.listIterator(context);
     while (try iter.next(context)) |value| {
         defer gc.decRef(Value, context, value) catch unreachable;
         const actual = try value.int(context);
         try expectEqual(expected_value, actual);
         expected_value += 1;
     }
+}
+
+test "set attrs" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try TestUtils.createAttrset(context, state);
+    defer gc.decRef(Value, context, value) catch unreachable;
+
+    try expect(value.valueType() == .attrs);
+    const expected_size: usize = 3;
+    try expectEqual(expected_size, try value.attrsetSize(context));
+}
+
+test "get attr at index" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try TestUtils.createAttrset(context, state);
+    defer gc.decRef(Value, context, value) catch unreachable;
+
+    const actual_kv = try value.attrAtIndex(context, 2);
+    defer gc.decRef(Value, context, actual_kv.value) catch unreachable;
+
+    try expectEqualSlices(u8, "what", actual_kv.name);
+    try expectEqualSlices(u8, "a cruel world", try actual_kv.value.string(context));
+}
+
+test "get attr by name" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try TestUtils.createAttrset(context, state);
+    defer gc.decRef(Value, context, value) catch unreachable;
+
+    const retrieved_value = try value.attrByName(context, "goodbye");
+    defer gc.decRef(Value, context, retrieved_value) catch unreachable;
+
+    try expectEqualSlices(u8, "cruel world", try retrieved_value.string(context));
+}
+
+test "get attr name at index" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try TestUtils.createAttrset(context, state);
+    defer gc.decRef(Value, context, value) catch unreachable;
+
+    try expectEqualSlices(u8, "hello", try value.attrNameAtIndex(context, 0));
+}
+
+test "check if attrset has/does not have attrs" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try TestUtils.createAttrset(context, state);
+    defer gc.decRef(Value, context, value) catch unreachable;
+
+    try expect(try value.hasAttrWithName(context, "hello"));
+    try expect(!try value.hasAttrWithName(context, "this attr does not exist"));
 }
