@@ -34,8 +34,7 @@ pub const EvalState = struct {
 
     const Self = @This();
 
-    /// Create a new Nix state. Caller must call `deinit()` to
-    /// release memory.
+    /// Create a new Nix state. Caller must call `deinit()` to release memory.
     // TODO: add search path param
     pub fn init(context: NixContext, store: Store) !Self {
         var new_state = libnix.nix_state_create(context.context, null, store.store);
@@ -50,8 +49,8 @@ pub const EvalState = struct {
         };
     }
 
-    /// Allocate a Nix value. Owned by the GC; use
-    /// `gc.deref` when finished with this value.
+    /// Allocate a Nix value. Owned by the GC; use `gc.decRef` to release
+    /// this value.
     pub fn createValue(self: Self, context: NixContext) !Value {
         var new_value = libnix.nix_alloc_value(context.context, self.state);
         if (new_value == null) {
@@ -66,15 +65,14 @@ pub const EvalState = struct {
     }
 
     /// Parse and evaluates a Nix expression from a string.
-    pub fn evalFromString(self: Self, allocator: Allocator, context: NixContext, expr: []const u8, path: []const u8, value: Value) !void {
-        const exprZ = try allocator.dupeZ(u8, expr);
-        defer allocator.free(exprZ);
+    pub fn evalFromString(self: Self, context: NixContext, expr: [:0]const u8, path: [:0]const u8) !Value {
+        const value = try self.createValue(context);
+        errdefer gc.decRef(Value, context, value) catch unreachable;
 
-        const pathZ = try allocator.dupeZ(u8, path);
-        defer allocator.free(pathZ);
-
-        const err = libnix.nix_expr_eval_from_string(context.context, self.state, expr.ptr, path.ptr, value.value);
+        const err = libnix.nix_expr_eval_from_string(context.context, self.state, expr, path, value.value);
         if (err != 0) return nixError(err);
+
+        return value;
     }
 
     /// Free this `NixState`. Does not fail.
@@ -97,7 +95,6 @@ pub const ValueType = enum(u8) {
     external,
 };
 
-// TODO: find out why asserts are segfaulting instead of returning error info?
 pub const Value = struct {
     value: *libnix.Value,
     state: *libnix.EvalState,
@@ -116,6 +113,7 @@ pub const Value = struct {
         return result;
     }
 
+    /// Set a 64-bit integer value.
     pub fn setInt(self: Self, context: NixContext, value: i64) !void {
         const err = libnix.nix_init_int(context.context, self.value, value);
         if (err != 0) return nixError(err);
@@ -128,6 +126,7 @@ pub const Value = struct {
         return result;
     }
 
+    /// Set a 64-bit floating-point value.
     pub fn setFloat(self: Self, context: NixContext, value: f64) !void {
         const err = libnix.nix_init_float(context.context, self.value, value);
         if (err != 0) return nixError(err);
@@ -140,6 +139,7 @@ pub const Value = struct {
         return result;
     }
 
+    /// Set a boolean value.
     pub fn setBoolean(self: Self, context: NixContext, value: bool) !void {
         const err = libnix.nix_init_bool(context.context, self.value, value);
         if (err != 0) return nixError(err);
@@ -155,6 +155,7 @@ pub const Value = struct {
         unreachable;
     }
 
+    /// Set a string value from a slice. Slice must be sentinel-terminated.
     pub fn setString(self: Self, context: NixContext, value: [:0]const u8) !void {
         const err = libnix.nix_init_string(context.context, self.value, value);
         if (err != 0) return nixError(err);
@@ -170,12 +171,14 @@ pub const Value = struct {
         unreachable;
     }
 
+    /// Set a path value from a slice. Slice must be sentinel-terminated.
     pub fn setPath(self: Self, context: NixContext, value: [:0]const u8) !void {
         // FIXME: setting a path hangs for some reason.
         const err = libnix.nix_init_path_string(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
+    /// Set this value to null.
     pub fn setNull(self: Self, context: NixContext) !void {
         const err = libnix.nix_init_null(context.context, self.value);
         if (err != 0) return nixError(err);
@@ -194,7 +197,7 @@ pub const Value = struct {
         return result;
     }
 
-    /// Get the element of a list at index `i`. Clean this up
+    /// Get the element of a list at index `i`. Release this value
     /// using `gc.decref`.
     pub fn listAtIndex(self: Self, context: NixContext, i: usize) !Value {
         const result = libnix.nix_get_list_byidx(context.context, self.value, self.state, @intCast(i));
@@ -344,6 +347,7 @@ pub const ListBuilder = struct {
 
     const Self = @This();
 
+    /// Create a new list value builder.
     pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
         var builder = libnix.nix_make_list_builder(context.context, state.state, capacity);
         if (builder == null) {
@@ -357,11 +361,13 @@ pub const ListBuilder = struct {
         };
     }
 
+    /// Insert a value at the given index into this builder.
     pub fn insert(self: Self, context: NixContext, index: c_uint, value: Value) NixError!void {
         const err = libnix.nix_list_builder_insert(context.context, self.builder, index, value.value);
         if (err != 0) return nixError(err);
     }
 
+    /// Free this list value builder.
     pub fn deinit(self: Self) void {
         libnix.nix_list_builder_free(self.builder);
     }
@@ -373,6 +379,7 @@ pub const BindingsBuilder = struct {
 
     const Self = @This();
 
+    /// Create a new attrset value (bindings) builder.
     pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
         var builder = libnix.nix_make_bindings_builder(context.context, state.state, capacity);
         if (builder == null) {
@@ -386,11 +393,13 @@ pub const BindingsBuilder = struct {
         };
     }
 
+    /// Insert a key-value binding into this builder.
     pub fn insert(self: Self, context: NixContext, name: [:0]const u8, value: Value) NixError!void {
         const err = libnix.nix_bindings_builder_insert(context.context, self.builder, name, value.value);
         if (err != 0) return nixError(err);
     }
 
+    /// Free this attrset value (bindings) builder.
     pub fn deinit(self: Self) void {
         libnix.nix_bindings_builder_free(self.builder);
     }
@@ -404,7 +413,7 @@ pub const ListIterator = struct {
     const Self = @This();
 
     /// Return the next element in the list as a `Value` if it exists.
-    /// Clean this value up using `gc.decRef`.
+    /// Release this value up using `gc.decRef`.
     pub fn next(self: *Self, context: NixContext) !?Value {
         if (self.index == self.size) {
             return null;
@@ -416,6 +425,19 @@ pub const ListIterator = struct {
         return try self.list.listAtIndex(context, current_index);
     }
 };
+
+test "eval value from string" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.evalFromString(context, "1 + 1", ".");
+    defer gc.decRef(Value, context, value) catch unreachable;
+
+    const expected: i64 = 2;
+    try expectEqual(expected, try value.int(context));
+}
 
 test "get/set integer" {
     const allocator = testing.allocator;
