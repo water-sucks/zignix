@@ -95,16 +95,16 @@ pub const ValueType = enum(u8) {
     external,
 };
 
+const AttrKeyValue = struct {
+    name: []const u8,
+    value: Value,
+};
+
 pub const Value = struct {
     value: *libnix.Value,
     state: *libnix.EvalState,
 
     const Self = @This();
-
-    const AttrKeyValue = struct {
-        name: []const u8,
-        value: Value,
-    };
 
     /// Get a 64-bit integer value.
     pub fn int(self: Self, context: NixContext) !i64 {
@@ -288,6 +288,16 @@ pub const Value = struct {
         return exists;
     }
 
+    /// Return an attrset iterator that iterates over each key-value pair.
+    pub fn attrsetIterator(self: Self, context: NixContext) !AttrsetIterator {
+        const size = try self.attrsetSize(context);
+
+        return AttrsetIterator{
+            .attrset = self,
+            .size = size,
+        };
+    }
+
     /// Get the type of this value.
     pub fn valueType(self: Self) ValueType {
         const result = libnix.nix_get_type(null, self.value);
@@ -423,6 +433,28 @@ pub const ListIterator = struct {
         self.index += 1;
 
         return try self.list.listAtIndex(context, current_index);
+    }
+};
+
+pub const AttrsetIterator = struct {
+    attrset: Value,
+    size: usize,
+    index: usize = 0,
+
+    const Self = @This();
+
+    /// Return the next key-value pair in the attrset as a `AttrKeyValue`
+    /// if it exists. Caller does not own returned memory at `.name`;
+    /// release the returned value using `gc.decRef`.
+    pub fn next(self: *Self, context: NixContext) !?AttrKeyValue {
+        if (self.index == self.size) {
+            return null;
+        }
+
+        const current_index = self.index;
+        self.index += 1;
+
+        return try self.attrset.attrAtIndex(context, current_index);
     }
 };
 
@@ -627,4 +659,34 @@ test "check if attrset has/does not have attrs" {
 
     try expect(try value.hasAttrWithName(context, "hello"));
     try expect(!try value.hasAttrWithName(context, "this attr does not exist"));
+}
+
+const TestKeyValuePair = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
+test "iterate through attrset" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try TestUtils.createAttrset(context, state);
+    defer gc.decRef(Value, context, value) catch unreachable;
+
+    const expected_attrs: []const TestKeyValuePair = &[3]TestKeyValuePair{
+        TestKeyValuePair{ .name = "hello", .value = "world" },
+        TestKeyValuePair{ .name = "goodbye", .value = "cruel world" },
+        TestKeyValuePair{ .name = "what", .value = "a cruel world" },
+    };
+
+    var expected_kv_index: usize = 0;
+    var iter = try value.attrsetIterator(context);
+    while (try iter.next(context)) |kv| {
+        defer gc.decRef(Value, context, kv.value) catch unreachable;
+        try expectEqualSlices(u8, expected_attrs[expected_kv_index].name, kv.name);
+        try expectEqualSlices(u8, expected_attrs[expected_kv_index].value, try kv.value.string(context));
+        expected_kv_index += 1;
+    }
 }
