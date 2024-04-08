@@ -16,11 +16,6 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
-    lib.linkLibC();
-    lib.linkSystemLibrary("nixexprc");
-    lib.linkSystemLibrary("nixstorec");
-    lib.linkSystemLibrary("nixutilc");
-
     const tests = b.addTest(.{
         .root_source_file = .{ .path = "src/lib.zig" },
         .target = target,
