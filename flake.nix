@@ -6,7 +6,7 @@
 
     flake-parts.url = "github:hercules-ci/flake-parts";
 
-    nix.url = "github:tweag/nix/nix-c-bindings";
+    nix.url = "github:nixos/nix";
 
     zig-overlay.url = "github:mitchellh/zig-overlay";
 
