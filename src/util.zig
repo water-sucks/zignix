@@ -25,7 +25,7 @@ pub const settings = struct {
     pub fn get(allocator: Allocator, context: NixContext, key: []const u8, max_bytes: c_int) ![]u8 {
         if (max_bytes < 1) @panic("nixutil: nix_setting_get: max_bytes cannot be < 1");
 
-        var buf = try allocator.alloc(u8, @intCast(max_bytes));
+        const buf = try allocator.alloc(u8, @intCast(max_bytes));
         defer allocator.free(buf);
 
         const keyz = try allocator.dupeZ(u8, key);
@@ -58,7 +58,7 @@ pub const NixContext = struct {
     /// Create an instance of NixContext. Caller must call deinit()
     /// to free memory with the underlying allocator.
     pub fn init() !Self {
-        var new_context = libnix.nix_c_context_create();
+        const new_context = libnix.nix_c_context_create();
         if (new_context == null) return error.OutOfMemory;
 
         return Self{

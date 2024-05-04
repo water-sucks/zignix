@@ -33,7 +33,7 @@
         system,
         ...
       }: let
-        zigPackage = inputs.zig-overlay.packages.${system}."0.11.0";
+        zigPackage = inputs.zig-overlay.packages.${system}."0.12.0";
         nixPackage = inputs.nix.packages.${system}.nix;
       in {
         devShells.default = pkgs.mkShell {

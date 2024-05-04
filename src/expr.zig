@@ -37,7 +37,7 @@ pub const EvalState = struct {
     /// Create a new Nix state. Caller must call `deinit()` to release memory.
     // TODO: add search path param
     pub fn init(context: NixContext, store: Store) !Self {
-        var new_state = libnix.nix_state_create(context.context, null, store.store);
+        const new_state = libnix.nix_state_create(context.context, null, store.store);
         if (new_state == null) {
             try context.errorCode();
             return error.OutOfMemory;
@@ -52,7 +52,7 @@ pub const EvalState = struct {
     /// Allocate a Nix value. Owned by the GC; use `gc.decRef` to release
     /// this value.
     pub fn createValue(self: Self, context: NixContext) !Value {
-        var new_value = libnix.nix_alloc_value(context.context, self.state);
+        const new_value = libnix.nix_alloc_value(context.context, self.state);
         if (new_value == null) {
             try context.errorCode();
             return error.OutOfMemory;
@@ -80,6 +80,10 @@ pub const EvalState = struct {
         libnix.nix_state_free(self.state);
     }
 };
+
+const cstr = @cImport({
+    @cInclude("string.h");
+});
 
 pub const ValueType = enum(u8) {
     thunk,
@@ -145,14 +149,21 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
-    /// Get a string value. Caller does not own returned memory.
-    pub fn string(self: Self, context: NixContext) ![]const u8 {
-        const result = libnix.nix_get_string(context.context, self.value);
-        if (result) |value| {
-            return mem.sliceTo(mem.span(value), 0);
-        }
-        try context.errorCode();
-        unreachable;
+    export fn owned_string_callback(start: [*c]const u8, n: c_uint, data: ?*anyopaque) callconv(.C) void {
+        _ = n;
+        const ptr: [*c][*c]u8 = @ptrCast(@alignCast(data));
+        ptr.* = cstr.strdup(start);
+    }
+
+    /// Get a string value. Caller owns returned memory.
+    pub fn string(self: Self, allocator: Allocator, context: NixContext) ![]const u8 {
+        var buf: [*c]u8 = undefined;
+        const err = libnix.nix_get_string(context.context, self.value, owned_string_callback, @ptrCast(&buf));
+        if (err != 0) return nixError(err);
+        if (buf == null) return error.OutOfMemory;
+
+        const owned = try allocator.dupe(u8, mem.sliceTo(mem.span(buf), 0));
+        return owned;
     }
 
     /// Set a string value from a slice. Slice must be sentinel-terminated.
@@ -359,7 +370,7 @@ pub const ListBuilder = struct {
 
     /// Create a new list value builder.
     pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
-        var builder = libnix.nix_make_list_builder(context.context, state.state, capacity);
+        const builder = libnix.nix_make_list_builder(context.context, state.state, capacity);
         if (builder == null) {
             try context.errorCode();
             return error.OutOfMemory;
@@ -391,7 +402,7 @@ pub const BindingsBuilder = struct {
 
     /// Create a new attrset value (bindings) builder.
     pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
-        var builder = libnix.nix_make_bindings_builder(context.context, state.state, capacity);
+        const builder = libnix.nix_make_bindings_builder(context.context, state.state, capacity);
         if (builder == null) {
             try context.errorCode();
             return error.outOfMemory;
@@ -525,7 +536,8 @@ test "get/set string slice" {
     const value = try state.createValue(context);
     try value.setString(context, "Goodbye, cruel world!");
 
-    const actual = try value.string(context);
+    const actual = try value.string(allocator, context);
+    defer allocator.free(actual);
     const expected: []const u8 = "Goodbye, cruel world!";
 
     try expectEqualSlices(u8, expected, actual);
@@ -617,8 +629,11 @@ test "get attr at index" {
     const actual_kv = try value.attrAtIndex(context, 2);
     defer gc.decRef(Value, context, actual_kv.value) catch unreachable;
 
+    const actual_value = try actual_kv.value.string(allocator, context);
+    defer allocator.free(actual_value);
+
     try expectEqualSlices(u8, "what", actual_kv.name);
-    try expectEqualSlices(u8, "a cruel world", try actual_kv.value.string(context));
+    try expectEqualSlices(u8, "a cruel world", actual_value);
 }
 
 test "get attr by name" {
@@ -633,7 +648,10 @@ test "get attr by name" {
     const retrieved_value = try value.attrByName(context, "goodbye");
     defer gc.decRef(Value, context, retrieved_value) catch unreachable;
 
-    try expectEqualSlices(u8, "cruel world", try retrieved_value.string(context));
+    const actual = try retrieved_value.string(allocator, context);
+    defer allocator.free(actual);
+
+    try expectEqualSlices(u8, "cruel world", actual);
 }
 
 test "get attr name at index" {
@@ -686,7 +704,11 @@ test "iterate through attrset" {
     while (try iter.next(context)) |kv| {
         defer gc.decRef(Value, context, kv.value) catch unreachable;
         try expectEqualSlices(u8, expected_attrs[expected_kv_index].name, kv.name);
-        try expectEqualSlices(u8, expected_attrs[expected_kv_index].value, try kv.value.string(context));
+
+        const actual = try kv.value.string(allocator, context);
+        defer allocator.free(actual);
+
+        try expectEqualSlices(u8, expected_attrs[expected_kv_index].value, actual);
         expected_kv_index += 1;
     }
 }

@@ -38,7 +38,7 @@ pub const Store = struct {
         const uriZ = try allocator.dupeZ(u8, uri);
         defer allocator.free(uriZ);
 
-        var new_store = libnix.nix_store_open(context.context, uriZ.ptr, null);
+        const new_store = libnix.nix_store_open(context.context, uriZ.ptr, null);
         if (new_store == null) {
             try context.errorCode(); // See if there was a Nix error first.
             return error.OutOfMemory; // Otherwise, probably out of memory.
@@ -51,7 +51,7 @@ pub const Store = struct {
     pub fn getVersion(self: Self, allocator: Allocator, context: NixContext, max_bytes: c_uint) ![]u8 {
         if (max_bytes < 1) @panic("nixstore: nix_store_get_version: max_bytes cannot be < 1");
 
-        var buf = try allocator.alloc(u8, @intCast(max_bytes));
+        const buf = try allocator.alloc(u8, @intCast(max_bytes));
         defer allocator.free(buf);
 
         const err = libnix.nix_store_get_version(context.context, self.store, buf.ptr, max_bytes);
@@ -64,7 +64,7 @@ pub const Store = struct {
     pub fn getUri(self: Self, allocator: Allocator, context: NixContext, max_bytes: c_uint) ![]u8 {
         if (max_bytes < 1) @panic("nixstore: nix_store_get_uri: max_bytes cannot be < 1");
 
-        var buf = try allocator.alloc(u8, @intCast(max_bytes));
+        const buf = try allocator.alloc(u8, @intCast(max_bytes));
         defer allocator.free(buf);
 
         const err = libnix.nix_store_get_uri(context.context, self.store, buf.ptr, max_bytes);
