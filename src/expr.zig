@@ -184,8 +184,7 @@ pub const Value = struct {
 
     /// Set a path value from a slice. Slice must be sentinel-terminated.
     pub fn setPath(self: Self, context: NixContext, value: [:0]const u8) !void {
-        // FIXME: setting a path hangs for some reason.
-        const err = libnix.nix_init_path_string(context.context, self.value, value);
+        const err = libnix.nix_init_path_string(context.context, self.state, self.value, value);
         if (err != 0) return nixError(err);
     }
 
@@ -543,21 +542,20 @@ test "get/set string slice" {
     try expectEqualSlices(u8, expected, actual);
 }
 
-// This test does not work, due to setting a path hanging.
-// test "get/set path string slice" {
-//     const allocator = testing.allocator;
-//     const resources = try TestUtils.initResources(allocator);
-//     const context = resources.context;
-//     const state = resources.state;
-//
-//     const value = try state.createValue(context);
-//     try value.setStringPath(context, "/nix/store");
-//
-//     const actual = try value.pathString(allocator, context);
-//     const expected: []const u8 = "/nix/store";
-//
-//     try expectEqualSlices(u8, expected, actual);
-// }
+test "get/set path string slice" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const value = try state.createValue(context);
+    try value.setPath(context, "/nix/store");
+
+    const actual = try value.pathString(context);
+    const expected: []const u8 = "/nix/store";
+
+    try expectEqualSlices(u8, expected, actual);
+}
 
 test "set null" {
     const allocator = testing.allocator;
@@ -566,7 +564,6 @@ test "set null" {
     const state = resources.state;
 
     const value = try state.createValue(context);
-    try value.setString(context, "Goodbye, cruel world!");
 
     try value.setNull(context);
     try expect(value.valueType() == .null);

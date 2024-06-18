@@ -8,8 +8,6 @@
 
     nix.url = "github:nixos/nix";
 
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
@@ -33,25 +31,20 @@
         system,
         ...
       }: let
-        zigPackage = inputs.zig-overlay.packages.${system}."0.12.0";
+        inherit (pkgs) zig pkg-config;
         nixPackage = inputs.nix.packages.${system}.nix;
       in {
         devShells.default = pkgs.mkShell {
           name = "nixos-shell";
-          packages = [
-            pkgs.alejandra
-            pkgs.zls
-          ];
           nativeBuildInputs = [
-            zigPackage
-            pkgs.pkg-config
+            zig
+            pkg-config
           ];
           buildInputs = [
             nixPackage.dev
           ];
 
-          ZIG_DOCS = "${zigPackage}/doc/langref.html";
-          ZIG_STD_DOCS = "${zigPackage}/doc/std/index.html";
+          ZIG_DOCS = "${zig}/doc/langref.html";
         };
       };
     };
