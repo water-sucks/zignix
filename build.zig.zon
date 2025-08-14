@@ -1,7 +1,8 @@
 .{
-    .name = "zignix",
+    .name = .zignix,
     .version = "0.0.1",
     .minimum_zig_version = "0.13.0",
-    .paths = .{ "build.zig", "build.zig.zon", "src", "README.md" },
+    .fingerprint = 0x81009a4839246cd1,
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
     .dependencies = .{},
 }
