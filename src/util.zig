@@ -138,43 +138,44 @@ pub const NixContext = struct {
     }
 };
 
-// FIXME: fetching settings does not work properly at this time, so the
-// tests do not catch anything.
-// test "getting valid setting succeeds" {
-//     const context = try NixContext.init();
-//     defer context.deinit();
-//
-//     try init(context);
-//
-//     _ = try settings.get(testing.allocator, context, "experimental-features");
-// }
-//
-// test "setting valid setting succeeds" {
-//     const context = try NixContext.init();
-//     defer context.deinit();
-//
-//     try init(context);
-//
-//     try settings.set(testing.allocator, context, "max-jobs", "5");
-//
-//     const actual = try settings.get(testing.allocator, context, "max-jobs");
-//     try testing.expectEqual("5", actual);
-// }
-//
-// test "getting invalid setting fails" {
-//     const context = try NixContext.init();
-//     defer context.deinit();
-//
-//     try init(context);
-//
-//     try testing.expectError(error.Key, settings.get(testing.allocator, context, "nonexistent"));
-// }
-//
-// test "setting invalid setting fails" {
-//     const context = try NixContext.init();
-//     defer context.deinit();
-//
-//     try init(context);
-//
-//     try testing.expectError(error.Key, settings.set(testing.allocator, context, "nonexistent", "value"));
-// }
+test "getting valid setting succeeds" {
+    const context = try NixContext.init(testing.allocator);
+    defer context.deinit();
+
+    try init(context);
+
+    const value = try settings.get(testing.allocator, context, "max-jobs");
+    defer testing.allocator.free(value);
+}
+
+test "setting valid setting succeeds" {
+    const context = try NixContext.init(testing.allocator);
+    defer context.deinit();
+
+    try init(context);
+
+    try settings.set(testing.allocator, context, "max-jobs", "5");
+
+    const actual = try settings.get(testing.allocator, context, "max-jobs");
+    defer testing.allocator.free(actual);
+
+    try testing.expectEqualStrings("5", actual);
+}
+
+test "getting invalid setting fails" {
+    const context = try NixContext.init(testing.allocator);
+    defer context.deinit();
+
+    try init(context);
+
+    try testing.expectError(error.Key, settings.get(testing.allocator, context, "nonexistent"));
+}
+
+test "setting invalid setting fails" {
+    const context = try NixContext.init(testing.allocator);
+    defer context.deinit();
+
+    try init(context);
+
+    try testing.expectError(error.Key, settings.set(testing.allocator, context, "nonexistent", "value"));
+}
