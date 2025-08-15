@@ -31,7 +31,6 @@ pub fn init(context: NixContext) NixError!void {
 
 pub const EvalState = struct {
     state: *libnix.EvalState,
-    store: *libnix.Store,
     allocator: Allocator,
 
     const Self = @This();
@@ -47,7 +46,6 @@ pub const EvalState = struct {
 
         return Self{
             .state = new_state.?,
-            .store = store.store,
             .allocator = allocator,
         };
     }
@@ -64,7 +62,7 @@ pub const EvalState = struct {
 
         return Value{
             .value = new_value.?,
-            .state = self.state,
+            .state = self,
             .allocator = self.allocator,
         };
     }
@@ -117,7 +115,7 @@ const AttrKeyValue = struct {
 
 pub const Value = struct {
     value: *libnix.Value,
-    state: *libnix.EvalState,
+    state: EvalState,
     allocator: Allocator,
 
     const Self = @This();
@@ -195,7 +193,7 @@ pub const Value = struct {
         const valuez = try self.allocator.dupeZ(u8, value);
         defer self.allocator.free(valuez);
 
-        const err = libnix.nix_init_path_string(context.context, self.state, self.value, valuez.ptr);
+        const err = libnix.nix_init_path_string(context.context, self.state.state, self.value, valuez.ptr);
         if (err != 0) return nixError(err);
     }
 
@@ -221,7 +219,7 @@ pub const Value = struct {
     /// Get the element of a list at index `i`. Release this value
     /// using `gc.decref`.
     pub fn listAtIndex(self: Self, context: NixContext, i: usize) !Value {
-        const result = libnix.nix_get_list_byidx(context.context, self.value, self.state, @intCast(i));
+        const result = libnix.nix_get_list_byidx(context.context, self.value, self.state.state, @intCast(i));
         if (result) |value| {
             return Value{
                 .value = value,
@@ -261,7 +259,7 @@ pub const Value = struct {
     /// to release the created value.
     pub fn attrAtIndex(self: Self, context: NixContext, i: usize) !AttrKeyValue {
         var buf: [*c]u8 = undefined;
-        const result = libnix.nix_get_attr_byidx(context.context, self.value, self.state, @intCast(i), @ptrCast(&buf));
+        const result = libnix.nix_get_attr_byidx(context.context, self.value, self.state.state, @intCast(i), @ptrCast(&buf));
         if (result) |value| {
             return AttrKeyValue{
                 .name = mem.sliceTo(mem.span(buf), 0),
@@ -283,7 +281,7 @@ pub const Value = struct {
         const namez = try self.allocator.dupeZ(u8, name);
         defer self.allocator.free(namez);
 
-        const result = libnix.nix_get_attr_byname(context.context, self.value, self.state, namez.ptr);
+        const result = libnix.nix_get_attr_byname(context.context, self.value, self.state.state, namez.ptr);
         if (result) |value| {
             return Value{
                 .state = self.state,
@@ -299,7 +297,7 @@ pub const Value = struct {
     /// Retrieve an attr name by index in the sorted bindings. Avoids
     /// evaluation of the value; caller does not own returned memory.
     pub fn attrNameAtIndex(self: Self, context: NixContext, i: usize) ![]const u8 {
-        const result = libnix.nix_get_attr_name_byidx(context.context, self.value, self.state, @intCast(i));
+        const result = libnix.nix_get_attr_name_byidx(context.context, self.value, self.state.state, @intCast(i));
         if (result) |value| {
             return mem.sliceTo(mem.span(value), 0);
         }
@@ -313,7 +311,7 @@ pub const Value = struct {
         const namez = try self.allocator.dupeZ(u8, name);
         defer self.allocator.free(namez);
 
-        const exists = libnix.nix_has_attr_byname(context.context, self.value, self.state, namez.ptr);
+        const exists = libnix.nix_has_attr_byname(context.context, self.value, self.state.state, namez.ptr);
         try context.errorCode();
         return exists;
     }
@@ -382,7 +380,6 @@ pub const gc = struct {
 };
 
 pub const ListBuilder = struct {
-    state: *libnix.EvalState,
     builder: *libnix.ListBuilder,
 
     const Self = @This();
@@ -396,7 +393,6 @@ pub const ListBuilder = struct {
         }
 
         return Self{
-            .state = state.state,
             .builder = builder.?,
         };
     }
@@ -414,7 +410,6 @@ pub const ListBuilder = struct {
 };
 
 pub const BindingsBuilder = struct {
-    state: *libnix.EvalState,
     builder: *libnix.BindingsBuilder,
     allocator: Allocator,
 
@@ -429,7 +424,6 @@ pub const BindingsBuilder = struct {
         }
 
         return Self{
-            .state = state.state,
             .builder = builder.?,
             .allocator = allocator,
         };
