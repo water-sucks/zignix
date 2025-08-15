@@ -32,12 +32,13 @@ pub fn init(context: NixContext) NixError!void {
 pub const EvalState = struct {
     state: *libnix.EvalState,
     store: *libnix.Store,
+    allocator: Allocator,
 
     const Self = @This();
 
     /// Create a new Nix state. Caller must call `deinit()` to release memory.
     // TODO: add search path param
-    pub fn init(context: NixContext, store: Store) !Self {
+    pub fn init(allocator: Allocator, context: NixContext, store: Store) !Self {
         const new_state = libnix.nix_state_create(context.context, null, store.store);
         if (new_state == null) {
             try context.errorCode();
@@ -47,11 +48,13 @@ pub const EvalState = struct {
         return Self{
             .state = new_state.?,
             .store = store.store,
+            .allocator = allocator,
         };
     }
 
-    /// Allocate a Nix value. Owned by the GC; use `gc.decRef` to release
-    /// this value.
+    /// Allocate a Nix value.
+    ///
+    /// Owned by the GC; use `gc.decRef` to release this value.
     pub fn createValue(self: Self, context: NixContext) !Value {
         const new_value = libnix.nix_alloc_value(context.context, self.state);
         if (new_value == null) {
@@ -62,15 +65,22 @@ pub const EvalState = struct {
         return Value{
             .value = new_value.?,
             .state = self.state,
+            .allocator = self.allocator,
         };
     }
 
     /// Parse and evaluates a Nix expression from a string.
-    pub fn evalFromString(self: Self, context: NixContext, expr: [:0]const u8, path: [:0]const u8) !Value {
+    pub fn evalFromString(self: Self, context: NixContext, expr: []const u8, path: []const u8) !Value {
+        const exprz = try self.allocator.dupeZ(u8, expr);
+        defer self.allocator.free(exprz);
+
+        const pathz = try self.allocator.dupeZ(u8, path);
+        defer self.allocator.free(pathz);
+
         const value = try self.createValue(context);
         errdefer gc.decRef(Value, context, value) catch unreachable;
 
-        const err = libnix.nix_expr_eval_from_string(context.context, self.state, expr, path, value.value);
+        const err = libnix.nix_expr_eval_from_string(context.context, self.state, exprz.ptr, pathz.ptr, value.value);
         if (err != 0) return nixError(err);
 
         return value;
@@ -108,6 +118,7 @@ const AttrKeyValue = struct {
 pub const Value = struct {
     value: *libnix.Value,
     state: *libnix.EvalState,
+    allocator: Allocator,
 
     const Self = @This();
 
@@ -160,9 +171,12 @@ pub const Value = struct {
         return string_data.result orelse Allocator.Error.OutOfMemory;
     }
 
-    /// Set a string value from a slice. Slice must be sentinel-terminated.
-    pub fn setString(self: Self, context: NixContext, value: [:0]const u8) !void {
-        const err = libnix.nix_init_string(context.context, self.value, value);
+    /// Set a string value from a Zig string slice.
+    pub fn setString(self: Self, context: NixContext, value: []const u8) !void {
+        const valuez = try self.allocator.dupeZ(u8, value);
+        defer self.allocator.free(valuez);
+
+        const err = libnix.nix_init_string(context.context, self.value, valuez.ptr);
         if (err != 0) return nixError(err);
     }
 
@@ -177,8 +191,11 @@ pub const Value = struct {
     }
 
     /// Set a path value from a slice. Slice must be sentinel-terminated.
-    pub fn setPath(self: Self, context: NixContext, value: [:0]const u8) !void {
-        const err = libnix.nix_init_path_string(context.context, self.state, self.value, value);
+    pub fn setPath(self: Self, context: NixContext, value: []const u8) !void {
+        const valuez = try self.allocator.dupeZ(u8, value);
+        defer self.allocator.free(valuez);
+
+        const err = libnix.nix_init_path_string(context.context, self.state, self.value, valuez.ptr);
         if (err != 0) return nixError(err);
     }
 
@@ -209,6 +226,7 @@ pub const Value = struct {
             return Value{
                 .value = value,
                 .state = self.state,
+                .allocator = self.allocator,
             };
         }
         try context.errorCode();
@@ -250,6 +268,7 @@ pub const Value = struct {
                 .value = Value{
                     .state = self.state,
                     .value = value,
+                    .allocator = self.allocator,
                 },
             };
         }
@@ -260,12 +279,16 @@ pub const Value = struct {
 
     /// Retrieve an attr value by name. Call `gc.decRef` to release the
     /// created value.
-    pub fn attrByName(self: Self, context: NixContext, name: [:0]const u8) !Value {
-        const result = libnix.nix_get_attr_byname(context.context, self.value, self.state, name);
+    pub fn attrByName(self: Self, context: NixContext, name: []const u8) !Value {
+        const namez = try self.allocator.dupeZ(u8, name);
+        defer self.allocator.free(namez);
+
+        const result = libnix.nix_get_attr_byname(context.context, self.value, self.state, namez.ptr);
         if (result) |value| {
             return Value{
                 .state = self.state,
                 .value = value,
+                .allocator = self.allocator,
             };
         }
 
@@ -286,8 +309,11 @@ pub const Value = struct {
     }
 
     /// Check if an attr with the provided name exists in this attrset.
-    pub fn hasAttrWithName(self: Self, context: NixContext, name: [:0]const u8) !bool {
-        const exists = libnix.nix_has_attr_byname(context.context, self.value, self.state, name);
+    pub fn hasAttrWithName(self: Self, context: NixContext, name: []const u8) !bool {
+        const namez = try self.allocator.dupeZ(u8, name);
+        defer self.allocator.free(namez);
+
+        const exists = libnix.nix_has_attr_byname(context.context, self.value, self.state, namez.ptr);
         try context.errorCode();
         return exists;
     }
@@ -376,8 +402,8 @@ pub const ListBuilder = struct {
     }
 
     /// Insert a value at the given index into this builder.
-    pub fn insert(self: Self, context: NixContext, index: c_uint, value: Value) NixError!void {
-        const err = libnix.nix_list_builder_insert(context.context, self.builder, index, value.value);
+    pub fn insert(self: Self, context: NixContext, index: usize, value: Value) NixError!void {
+        const err = libnix.nix_list_builder_insert(context.context, self.builder, @intCast(index), value.value);
         if (err != 0) return nixError(err);
     }
 
@@ -390,11 +416,12 @@ pub const ListBuilder = struct {
 pub const BindingsBuilder = struct {
     state: *libnix.EvalState,
     builder: *libnix.BindingsBuilder,
+    allocator: Allocator,
 
     const Self = @This();
 
     /// Create a new attrset value (bindings) builder.
-    pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
+    pub fn init(allocator: Allocator, context: NixContext, state: EvalState, capacity: usize) !Self {
         const builder = libnix.nix_make_bindings_builder(context.context, state.state, capacity);
         if (builder == null) {
             try context.errorCode();
@@ -404,12 +431,16 @@ pub const BindingsBuilder = struct {
         return Self{
             .state = state.state,
             .builder = builder.?,
+            .allocator = allocator,
         };
     }
 
     /// Insert a key-value binding into this builder.
-    pub fn insert(self: Self, context: NixContext, name: [:0]const u8, value: Value) NixError!void {
-        const err = libnix.nix_bindings_builder_insert(context.context, self.builder, name, value.value);
+    pub fn insert(self: Self, context: NixContext, name: []const u8, value: Value) !void {
+        const namez = try self.allocator.dupeZ(u8, name);
+        defer self.allocator.free(namez);
+
+        const err = libnix.nix_bindings_builder_insert(context.context, self.builder, namez.ptr, value.value);
         if (err != 0) return nixError(err);
     }
 

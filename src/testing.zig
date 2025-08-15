@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const test_allocator = std.testing.allocator;
 
 const nix = @import("../src/lib.zig");
 const NixContext = nix.util.NixContext;
@@ -27,7 +28,7 @@ pub const TestUtils = struct {
         const store = try Store.open(allocator, context, "", .{});
         errdefer store.deinit();
 
-        const state = try EvalState.init(context, store);
+        const state = try EvalState.init(allocator, context, store);
 
         return TestResources{
             .context = context,
@@ -60,7 +61,7 @@ pub const TestUtils = struct {
             .{ .name = "what", .value = "a cruel world" },
         };
 
-        const builder = try BindingsBuilder.init(context, state, 10);
+        const builder = try BindingsBuilder.init(test_allocator, context, state, 10);
         defer builder.deinit();
 
         inline for (attrs) |kv| {
