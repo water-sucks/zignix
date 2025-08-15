@@ -22,10 +22,10 @@ pub const TestUtils = struct {
         errdefer context.deinit();
 
         try nix.util.init(context);
-        try nix.store.init(context);
+        try nix.store.init(context, false);
         try nix.expr.init(context);
 
-        const store = try Store.open(allocator, context, "", .{});
+        const store = try Store.open(allocator, context, "dummy://", .{});
         errdefer store.deinit();
 
         const state = try EvalState.init(allocator, context, store);
