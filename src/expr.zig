@@ -243,7 +243,7 @@ pub const Value = struct {
     /// to release the created value.
     pub fn attrAtIndex(self: Self, context: NixContext, i: usize) !AttrKeyValue {
         var buf: [*c]u8 = undefined;
-        const result = libnix.nix_get_attr_byidx(context.context, self.value, self.state, @intCast(i), &buf);
+        const result = libnix.nix_get_attr_byidx(context.context, self.value, self.state, @intCast(i), @ptrCast(&buf));
         if (result) |value| {
             return AttrKeyValue{
                 .name = mem.sliceTo(mem.span(buf), 0),
