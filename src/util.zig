@@ -55,18 +55,20 @@ pub const NixContext = struct {
     /// The internal opaque context for storing Nix error messages.
     /// Do not touch unless you know what you are doing.
     context: *libnix.nix_c_context,
+    allocator: Allocator,
 
     const Self = @This();
 
     /// Create an instance of NixContext.
     ///
     /// Caller must call deinit() to free memory with the underlying allocator.
-    pub fn init() !Self {
+    pub fn init(allocator: Allocator) !Self {
         const new_context = libnix.nix_c_context_create();
         if (new_context == null) return error.OutOfMemory;
 
         return Self{
             .context = new_context.?,
+            .allocator = allocator,
         };
     }
 
@@ -81,11 +83,16 @@ pub const NixContext = struct {
     /// Used to inspect Nix error messages; only call after the previous
     /// Nix function has returned `NixError.NixError`.
     ///
+    /// If an error is returned from here, this is likely not recoverable.
+    ///
     /// Caller owns returned memory.
-    pub fn errorInfoMessage(self: Self, allocator: Allocator, context: NixContext) ![]u8 {
-        var data = c.StringDataContainer.new(allocator);
+    pub fn errorInfoMessage(self: Self) ![]u8 {
+        const scratch_context = try Self.init(self.allocator);
+        defer scratch_context.deinit();
 
-        const err = libnix.nix_err_info_msg(context.context, self.context, c.genericGetStringCallback, &data);
+        var data = c.StringDataContainer.new(self.allocator);
+
+        const err = libnix.nix_err_info_msg(scratch_context.context, self.context, c.genericGetStringCallback, &data);
         if (err != 0) return nixError(err);
 
         return data.result orelse Allocator.Error.OutOfMemory;
@@ -94,9 +101,14 @@ pub const NixContext = struct {
     /// Retrieve the most recent error message directly from a context
     /// if it exists.
     ///
+    /// If an error is returned from here, this is likely not recoverable.
+    ///
     /// Caller does not own returned memory.
-    pub fn errorMessage(self: Self, context: NixContext) !?[]const u8 {
-        const message = libnix.nix_err_msg(context.context, self.context, null);
+    pub fn errorMessage(self: Self) !?[]const u8 {
+        const scratch_context = try Self.init(self.allocator);
+        defer scratch_context.deinit();
+
+        const message = libnix.nix_err_msg(scratch_context.context, self.context, null);
         return if (message) |m| mem.span(m) else null;
     }
 
@@ -105,11 +117,16 @@ pub const NixContext = struct {
     /// Used to inspect Nix error messages; only call after the previous
     /// Nix function has returned a `NixError.NixError`.
     ///
+    /// If an error is returned from here, this is likely not recoverable.
+    ///
     /// Caller owns returned memory.
-    pub fn errorName(self: Self, allocator: Allocator, context: NixContext) ![]u8 {
-        var data = c.StringDataContainer.new(allocator);
+    pub fn errorName(self: Self) ![]u8 {
+        const scratch_context = try Self.init(self.allocator);
+        defer scratch_context.deinit();
 
-        const err = libnix.nix_err_name(context.context, self.context, c.genericGetStringCallback, &data);
+        var data = c.StringDataContainer.new(self.allocator);
+
+        const err = libnix.nix_err_name(scratch_context.context, self.context, c.genericGetStringCallback, &data);
         if (err != 0) return nixError(err);
 
         return data.result orelse Allocator.Error.OutOfMemory;

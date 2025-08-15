@@ -18,7 +18,7 @@ pub const TestUtils = struct {
     };
 
     pub fn initResources(allocator: Allocator) !TestResources {
-        const context = try NixContext.init();
+        const context = try NixContext.init(allocator);
         errdefer context.deinit();
 
         try nix.util.init(context);
