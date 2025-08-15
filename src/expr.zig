@@ -17,7 +17,8 @@ const NixContext = util.NixContext;
 const lstore = @import("./store.zig");
 const Store = lstore.Store;
 
-const libnix = @import("./c.zig").libnix;
+const c = @import("./c.zig");
+const libnix = c.libnix;
 
 const TestUtils = @import("testing.zig").TestUtils;
 
@@ -149,21 +150,14 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
-    export fn owned_string_callback(start: [*c]const u8, n: c_uint, data: ?*anyopaque) callconv(.C) void {
-        _ = n;
-        const ptr: [*c][*c]u8 = @ptrCast(@alignCast(data));
-        ptr.* = cstr.strdup(start);
-    }
-
     /// Get a string value. Caller owns returned memory.
     pub fn string(self: Self, allocator: Allocator, context: NixContext) ![]const u8 {
-        var buf: [*c]u8 = undefined;
-        const err = libnix.nix_get_string(context.context, self.value, owned_string_callback, @ptrCast(&buf));
-        if (err != 0) return nixError(err);
-        if (buf == null) return error.OutOfMemory;
+        var string_data = c.StringDataContainer.new(allocator);
 
-        const owned = try allocator.dupe(u8, mem.sliceTo(mem.span(buf), 0));
-        return owned;
+        const err = libnix.nix_get_string(context.context, self.value, c.genericGetStringCallback, &string_data);
+        if (err != 0) return nixError(err);
+
+        return string_data.result orelse Allocator.Error.OutOfMemory;
     }
 
     /// Set a string value from a slice. Slice must be sentinel-terminated.

@@ -1,12 +1,13 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const testing = std.testing;
 
+const c = @import("./c.zig");
+const libnix = c.libnix;
 const errors = @import("./error.zig");
 const nixError = errors.nixError;
 const NixError = errors.NixError;
-
-const libnix = @import("./c.zig").libnix;
 
 /// Initialize libutil and its dependencies.
 pub fn init(context: NixContext) NixError!void {
@@ -22,19 +23,16 @@ pub fn version() []const u8 {
 pub const settings = struct {
     /// Retrieve a setting from the Nix global configuration.
     /// Caller owns returned memory.
-    pub fn get(allocator: Allocator, context: NixContext, key: []const u8, max_bytes: c_int) ![]u8 {
-        if (max_bytes < 1) @panic("nixutil: nix_setting_get: max_bytes cannot be < 1");
-
-        const buf = try allocator.alloc(u8, @intCast(max_bytes));
-        defer allocator.free(buf);
-
+    pub fn get(allocator: Allocator, context: NixContext, key: []const u8) ![]u8 {
         const keyz = try allocator.dupeZ(u8, key);
         defer allocator.free(keyz);
 
-        const err = libnix.nix_setting_get(context.context, keyz.ptr, buf.ptr, max_bytes);
+        var data = c.StringDataContainer.new(allocator);
+
+        const err = libnix.nix_setting_get(context.context, key.ptr, c.genericGetStringCallback, &data);
         if (err != 0) return nixError(err);
 
-        return try allocator.dupe(u8, mem.sliceTo(buf, 0));
+        return data.result orelse Allocator.Error.OutOfMemory;
     }
 
     /// Set a setting in the Nix global configuration.
@@ -50,13 +48,19 @@ pub const settings = struct {
     }
 };
 
+/// Nix error state.
+///
+/// Use this to handle/diagnose errors from Nix code itself.
 pub const NixContext = struct {
+    /// The internal opaque context for storing Nix error messages.
+    /// Do not touch unless you know what you are doing.
     context: *libnix.nix_c_context,
 
     const Self = @This();
 
-    /// Create an instance of NixContext. Caller must call deinit()
-    /// to free memory with the underlying allocator.
+    /// Create an instance of NixContext.
+    ///
+    /// Caller must call deinit() to free memory with the underlying allocator.
     pub fn init() !Self {
         const new_context = libnix.nix_c_context_create();
         if (new_context == null) return error.OutOfMemory;
@@ -73,41 +77,42 @@ pub const NixContext = struct {
     }
 
     /// Retrieve the error message from errorInfo inside another context.
+    ///
     /// Used to inspect Nix error messages; only call after the previous
-    /// Nix function has returned `NixError.NixError`. Caller owns returned
-    /// memory.
-    pub fn errorInfoMessage(self: Self, allocator: Allocator, context: NixContext, max_bytes: c_int) ![]u8 {
-        if (max_bytes < 1) @panic("nixutil: nix_err_info_msg: max_bytes cannot be < 1");
+    /// Nix function has returned `NixError.NixError`.
+    ///
+    /// Caller owns returned memory.
+    pub fn errorInfoMessage(self: Self, allocator: Allocator, context: NixContext) ![]u8 {
+        var data = c.StringDataContainer.new(allocator);
 
-        const buf = try allocator.alloc(u8, @intCast(max_bytes));
-        defer allocator.free(buf);
-
-        const err = libnix.nix_err_info_msg(context.context, self.context, buf.ptr, max_bytes);
+        const err = libnix.nix_err_info_msg(context.context, self.context, c.genericGetStringCallback, &data);
         if (err != 0) return nixError(err);
 
-        return try allocator.dupe(u8, mem.sliceTo(buf, 0));
+        return data.result orelse Allocator.Error.OutOfMemory;
     }
 
-    /// Retrieve the most recent error message directly from a context.
+    /// Retrieve the most recent error message directly from a context
+    /// if it exists.
+    ///
     /// Caller does not own returned memory.
     pub fn errorMessage(self: Self, context: NixContext) !?[]const u8 {
         const message = libnix.nix_err_msg(context.context, self.context, null);
         return if (message) |m| mem.span(m) else null;
     }
 
-    /// Retrieve the error name from a context. Used to inspect Nix error
-    /// messages; only call after the previous Nix function has returned
-    /// `NixError.NixError`. Caller owns returned memory.
-    pub fn errorName(self: Self, allocator: Allocator, context: NixContext, max_bytes: c_int) ![]u8 {
-        if (max_bytes < 1) @panic("nixutil: nix_err_name: max_bytes cannot be < 1");
+    /// Retrieve the error name from a context.
+    ///
+    /// Used to inspect Nix error messages; only call after the previous
+    /// Nix function has returned a `NixError.NixError`.
+    ///
+    /// Caller owns returned memory.
+    pub fn errorName(self: Self, allocator: Allocator, context: NixContext) ![]u8 {
+        var data = c.StringDataContainer.new(allocator);
 
-        const buf = try allocator.alloc(u8, @intCast(max_bytes));
-        errdefer allocator.free(buf);
-
-        const err = libnix.nix_err_name(context.context, self.context, buf.ptr, max_bytes);
+        const err = libnix.nix_err_name(context.context, self.context, c.genericGetStringCallback, &data);
         if (err != 0) return nixError(err);
 
-        return try allocator.dupe(u8, mem.sliceTo(buf, 0));
+        return data.result orelse Allocator.Error.OutOfMemory;
     }
 
     /// Free the `NixContext`. Does not fail.
@@ -115,3 +120,44 @@ pub const NixContext = struct {
         libnix.nix_c_context_free(self.context);
     }
 };
+
+// FIXME: fetching settings does not work properly at this time, so the
+// tests do not catch anything.
+// test "getting valid setting succeeds" {
+//     const context = try NixContext.init();
+//     defer context.deinit();
+//
+//     try init(context);
+//
+//     _ = try settings.get(testing.allocator, context, "experimental-features");
+// }
+//
+// test "setting valid setting succeeds" {
+//     const context = try NixContext.init();
+//     defer context.deinit();
+//
+//     try init(context);
+//
+//     try settings.set(testing.allocator, context, "max-jobs", "5");
+//
+//     const actual = try settings.get(testing.allocator, context, "max-jobs");
+//     try testing.expectEqual("5", actual);
+// }
+//
+// test "getting invalid setting fails" {
+//     const context = try NixContext.init();
+//     defer context.deinit();
+//
+//     try init(context);
+//
+//     try testing.expectError(error.Key, settings.get(testing.allocator, context, "nonexistent"));
+// }
+//
+// test "setting invalid setting fails" {
+//     const context = try NixContext.init();
+//     defer context.deinit();
+//
+//     try init(context);
+//
+//     try testing.expectError(error.Key, settings.set(testing.allocator, context, "nonexistent", "value"));
+// }
