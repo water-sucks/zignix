@@ -346,6 +346,41 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
+    pub fn call(self: Self, context: NixContext, args: []const Value) !Value {
+        if (args.len < 1) {
+            @panic("no arguments provided when calling nix value as a function");
+        }
+
+        if (args.len == 1) {
+            const result = try self.state.createValue(context);
+            errdefer {
+                gc.decRef(Value, context, result) catch {};
+            }
+
+            const err = libnix.nix_value_call(context.context, self.state.state, self.value, args[0].value, result.value);
+            if (err != 0) return nixError(err);
+
+            return result;
+        }
+
+        var values = try self.allocator.alloc(?*libnix.nix_value, args.len);
+        defer self.allocator.free(values);
+
+        for (args, 0..) |value, i| {
+            values[i] = value.value;
+        }
+
+        const result = try self.state.createValue(context);
+        errdefer {
+            gc.decRef(Value, context, result) catch {};
+        }
+
+        const err = libnix.nix_value_call_multi(context.context, self.state.state, self.value, args.len, values.ptr, result.value);
+        if (err != 0) return nixError(err);
+
+        return result;
+    }
+
     // TODO: make a toOwnedSlice method for stringifying a value.
 };
 
@@ -361,10 +396,9 @@ pub const gc = struct {
         if (T == Value) {
             const err = libnix.nix_gc_incref(context.context, object.value);
             if (err != 0) return nixError(err);
+        } else {
+            @compileError("value to increment GC refcount on must be a valid GC-able type");
         }
-
-        // TODO: are there any more value types to handle?
-        @compileError("value to increment GC refcount on must be a valid GC-able type");
     }
 
     /// Decrement the garbage collector reference counter for the given object.
@@ -373,7 +407,6 @@ pub const gc = struct {
             const err = libnix.nix_gc_decref(context.context, object.value);
             if (err != 0) return nixError(err);
         } else {
-            // TODO: are there any more value types to handle?
             @compileError("value to increment GC refcount on must be a valid GC-able type");
         }
     }
@@ -727,4 +760,55 @@ test "iterate through attrset" {
         try expectEqualSlices(u8, expected_attrs[expected_kv_index].value, actual);
         expected_kv_index += 1;
     }
+}
+
+test "call function with a single argument" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const function = try state.evalFromString(context, "a: a + 1", ".");
+
+    var value = try state.createValue(context);
+    try value.setInt(context, 10);
+
+    const result_value = try function.call(context, &.{value});
+
+    const expected: i64 = 11;
+    try expectEqual(expected, try result_value.int(context));
+}
+
+test "call function with multiple arguments" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const function = try state.evalFromString(context, "a: b: a + b", ".");
+
+    var value = try state.createValue(context);
+    try value.setInt(context, 1);
+
+    var value2 = try state.createValue(context);
+    try value2.setInt(context, 2);
+
+    const result_value = try function.call(context, &.{ value, value2 });
+
+    const expected: i64 = 3;
+    try expectEqual(expected, try result_value.int(context));
+}
+
+test "call function with incorrect argument type" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    const context = resources.context;
+    const state = resources.state;
+
+    const function = try state.evalFromString(context, "a: a + 1", ".");
+
+    var value = try state.createValue(context);
+    try value.setString(context, "hi");
+
+    try testing.expectError(error.NixError, function.call(context, &.{value}));
 }
