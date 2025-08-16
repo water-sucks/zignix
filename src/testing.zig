@@ -12,9 +12,15 @@ const BindingsBuilder = nix.expr.BindingsBuilder;
 
 pub const TestUtils = struct {
     pub const TestResources = struct {
-        context: NixContext,
+        context: *NixContext,
         store: Store,
         state: EvalState,
+
+        pub fn deinit(self: @This()) void {
+            self.state.deinit();
+            self.store.deinit();
+            self.context.deinit();
+        }
     };
 
     pub fn initResources(allocator: Allocator) !TestResources {
@@ -37,7 +43,7 @@ pub const TestUtils = struct {
         };
     }
 
-    pub fn createList(context: NixContext, state: EvalState) !Value {
+    pub fn createList(context: *NixContext, state: EvalState) !Value {
         const value = try state.createValue(context);
 
         const builder = try ListBuilder.init(context, state, 10);
@@ -53,7 +59,7 @@ pub const TestUtils = struct {
         return value;
     }
 
-    pub fn createAttrset(context: NixContext, state: EvalState) !Value {
+    pub fn createAttrset(context: *NixContext, state: EvalState) !Value {
         const value = try state.createValue(context);
         const attrs = &.{
             .{ .name = "hello", .value = "world" },

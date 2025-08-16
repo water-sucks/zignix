@@ -14,7 +14,7 @@ const libnix = c.libnix;
 
 /// Initialize the Nix store library. Call this before
 /// creating a store; it can be called multiple times.
-pub fn init(context: NixContext, load_config: bool) NixError!void {
+pub fn init(context: *NixContext, load_config: bool) NixError!void {
     const err = if (load_config)
         libnix.nix_libstore_init(context.context)
     else
@@ -26,7 +26,7 @@ pub fn init(context: NixContext, load_config: bool) NixError!void {
 /// Load plugins specified in the settings. Call this
 /// once, after calling the other init functions and setting
 /// any desired settings.
-pub fn initPlugins(context: NixContext) NixError!void {
+pub fn initPlugins(context: *NixContext) NixError!void {
     const err = libnix.nix_init_plugins(context.context);
     if (err != 0) return nixError(err);
 }
@@ -38,7 +38,7 @@ pub const Store = struct {
     const Self = @This();
 
     /// Open a Nix store. Call `deinit()` after to release memory.
-    pub fn open(allocator: Allocator, context: NixContext, uri: []const u8, options: anytype) !Self {
+    pub fn open(allocator: Allocator, context: *NixContext, uri: []const u8, options: anytype) !Self {
         _ = options;
 
         const uriZ = try allocator.dupeZ(u8, uri);
@@ -59,7 +59,7 @@ pub const Store = struct {
     /// Get the version of a Nix store.
     ///
     /// Caller owns returned memory.
-    pub fn getVersion(self: Self, context: NixContext) ![]u8 {
+    pub fn getVersion(self: Self, context: *NixContext) ![]u8 {
         var string_data = c.StringDataContainer.new(self.allocator);
 
         const err = libnix.nix_store_get_version(context.context, self.store, c.genericGetStringCallback, &string_data);
@@ -71,7 +71,7 @@ pub const Store = struct {
     /// Get the URI of a Nix store.
     ///
     /// Caller owns returned memory.
-    pub fn getUri(self: Self, context: NixContext) ![]u8 {
+    pub fn getUri(self: Self, context: *NixContext) ![]u8 {
         var string_data = c.StringDataContainer.new(self.allocator);
 
         const err = libnix.nix_store_get_uri(context.context, self.store, c.genericGetStringCallback, &string_data);
@@ -83,7 +83,7 @@ pub const Store = struct {
     /// Get the store directory of a Nix store.
     ///
     /// Caller owns returned memory.
-    pub fn getStoreDir(self: Self, context: NixContext) ![]u8 {
+    pub fn getStoreDir(self: Self, context: *NixContext) ![]u8 {
         var string_data = c.StringDataContainer.new(self.allocator);
 
         const err = libnix.nix_store_get_storedir(context.context, self.store, c.genericGetStringCallback, &string_data);
@@ -93,7 +93,7 @@ pub const Store = struct {
     }
 
     /// Retrieve a store path from a Nix store.
-    pub fn parsePath(self: Self, context: NixContext, path: []const u8) !StorePath {
+    pub fn parsePath(self: Self, context: *NixContext, path: []const u8) !StorePath {
         const pathZ = try self.allocator.dupeZ(u8, path);
         defer self.allocator.free(pathZ);
 
@@ -110,7 +110,7 @@ pub const Store = struct {
         };
     }
 
-    pub fn copyClosure(self: Self, context: NixContext, dest: Store, path: StorePath) !void {
+    pub fn copyClosure(self: Self, context: *NixContext, dest: Store, path: StorePath) !void {
         if (self.store != path.store.store) {
             @panic("passed StorePath did not come from this store");
         }
@@ -162,7 +162,7 @@ pub const StorePath = struct {
     /// Not all stores support this operation.
     ///
     /// Caller owns returned memory.
-    pub fn realPath(self: Self, context: NixContext) ![]const u8 {
+    pub fn realPath(self: Self, context: *NixContext) ![]const u8 {
         var string_data = c.StringDataContainer.new(self.allocator);
 
         const err = libnix.nix_store_real_path(context.context, self.store.store, self.path, c.genericGetStringCallback, &string_data);
@@ -173,7 +173,7 @@ pub const StorePath = struct {
 
     /// Check if this StorePath is valid (aka if exists in the referenced
     /// store). Error info is stored in the passed context.
-    pub fn isValid(self: Self, context: NixContext) bool {
+    pub fn isValid(self: Self, context: *NixContext) bool {
         const valid = libnix.nix_store_is_valid_path(context.context, self.store, self.path);
         return valid;
     }
@@ -220,7 +220,7 @@ pub const StorePath = struct {
     /// release memory.
     pub fn realise(
         self: Self,
-        context: NixContext,
+        context: *NixContext,
     ) NixError!RealisedPath {
         var container = StorePath.RealisedPathContainer{
             .name = null,

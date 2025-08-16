@@ -24,7 +24,7 @@ const TestUtils = @import("testing.zig").TestUtils;
 
 /// Initialize the Nix expression evaluator. Call this function
 /// before creating any `State`s; it can be called multiple times.
-pub fn init(context: NixContext) NixError!void {
+pub fn init(context: *NixContext) NixError!void {
     const err = libnix.nix_libexpr_init(context.context);
     if (err != 0) return nixError(err);
 }
@@ -37,7 +37,7 @@ pub const EvalState = struct {
 
     /// Create a new Nix state. Caller must call `deinit()` to release memory.
     // TODO: add search path param
-    pub fn init(allocator: Allocator, context: NixContext, store: Store) !Self {
+    pub fn init(allocator: Allocator, context: *NixContext, store: Store) !Self {
         const new_state = libnix.nix_state_create(context.context, null, store.store);
         if (new_state == null) {
             try context.errorCode();
@@ -53,7 +53,7 @@ pub const EvalState = struct {
     /// Allocate a Nix value.
     ///
     /// Owned by the GC; use `gc.decRef` to release this value.
-    pub fn createValue(self: Self, context: NixContext) !Value {
+    pub fn createValue(self: Self, context: *NixContext) !Value {
         const new_value = libnix.nix_alloc_value(context.context, self.state);
         if (new_value == null) {
             try context.errorCode();
@@ -68,7 +68,7 @@ pub const EvalState = struct {
     }
 
     /// Parse and evaluates a Nix expression from a string.
-    pub fn evalFromString(self: Self, context: NixContext, expr: []const u8, path: []const u8) !Value {
+    pub fn evalFromString(self: Self, context: *NixContext, expr: []const u8, path: []const u8) !Value {
         const exprz = try self.allocator.dupeZ(u8, expr);
         defer self.allocator.free(exprz);
 
@@ -76,7 +76,6 @@ pub const EvalState = struct {
         defer self.allocator.free(pathz);
 
         const value = try self.createValue(context);
-        errdefer gc.decRef(Value, context, value) catch unreachable;
 
         const err = libnix.nix_expr_eval_from_string(context.context, self.state, exprz.ptr, pathz.ptr, value.value);
         if (err != 0) return nixError(err);
@@ -89,10 +88,6 @@ pub const EvalState = struct {
         libnix.nix_state_free(self.state);
     }
 };
-
-const cstr = @cImport({
-    @cInclude("string.h");
-});
 
 pub const ValueType = enum(u8) {
     thunk,
@@ -121,47 +116,47 @@ pub const Value = struct {
     const Self = @This();
 
     /// Get a 64-bit integer value.
-    pub fn int(self: Self, context: NixContext) !i64 {
+    pub fn int(self: Self, context: *NixContext) !i64 {
         const result = libnix.nix_get_int(context.context, self.value);
         try context.errorCode();
         return result;
     }
 
     /// Set a 64-bit integer value.
-    pub fn setInt(self: Self, context: NixContext, value: i64) !void {
+    pub fn setInt(self: Self, context: *NixContext, value: i64) !void {
         const err = libnix.nix_init_int(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
     /// Get a 64-bit floating-point value.
-    pub fn float(self: Self, context: NixContext) !f64 {
+    pub fn float(self: Self, context: *NixContext) !f64 {
         const result = libnix.nix_get_float(context.context, self.value);
         try context.errorCode();
         return result;
     }
 
     /// Set a 64-bit floating-point value.
-    pub fn setFloat(self: Self, context: NixContext, value: f64) !void {
+    pub fn setFloat(self: Self, context: *NixContext, value: f64) !void {
         const err = libnix.nix_init_float(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
     /// Get a boolean value.
-    pub fn boolean(self: Self, context: NixContext) !bool {
+    pub fn boolean(self: Self, context: *NixContext) !bool {
         const result = libnix.nix_get_bool(context.context, self.value);
         try context.errorCode();
         return result;
     }
 
     /// Set a boolean value.
-    pub fn setBoolean(self: Self, context: NixContext, value: bool) !void {
+    pub fn setBoolean(self: Self, context: *NixContext, value: bool) !void {
         const err = libnix.nix_init_bool(context.context, self.value, value);
         if (err != 0) return nixError(err);
     }
 
     /// Get a string value. Caller owns returned memory.
-    pub fn string(self: Self, allocator: Allocator, context: NixContext) ![]const u8 {
-        var string_data = c.StringDataContainer.new(allocator);
+    pub fn string(self: Self, context: *NixContext) ![]const u8 {
+        var string_data = c.StringDataContainer.new(self.allocator);
 
         const err = libnix.nix_get_string(context.context, self.value, c.genericGetStringCallback, &string_data);
         if (err != 0) return nixError(err);
@@ -170,7 +165,7 @@ pub const Value = struct {
     }
 
     /// Set a string value from a Zig string slice.
-    pub fn setString(self: Self, context: NixContext, value: []const u8) !void {
+    pub fn setString(self: Self, context: *NixContext, value: []const u8) !void {
         const valuez = try self.allocator.dupeZ(u8, value);
         defer self.allocator.free(valuez);
 
@@ -179,7 +174,7 @@ pub const Value = struct {
     }
 
     /// Get a path value as a string. Caller does not own returned memory.
-    pub fn pathString(self: Self, context: NixContext) ![]const u8 {
+    pub fn pathString(self: Self, context: *NixContext) ![]const u8 {
         const result = libnix.nix_get_path_string(context.context, self.value);
         if (result) |value| {
             return mem.sliceTo(mem.span(value), 0);
@@ -189,7 +184,7 @@ pub const Value = struct {
     }
 
     /// Set a path value from a slice. Slice must be sentinel-terminated.
-    pub fn setPath(self: Self, context: NixContext, value: []const u8) !void {
+    pub fn setPath(self: Self, context: *NixContext, value: []const u8) !void {
         const valuez = try self.allocator.dupeZ(u8, value);
         defer self.allocator.free(valuez);
 
@@ -198,19 +193,19 @@ pub const Value = struct {
     }
 
     /// Set this value to null.
-    pub fn setNull(self: Self, context: NixContext) !void {
+    pub fn setNull(self: Self, context: *NixContext) !void {
         const err = libnix.nix_init_null(context.context, self.value);
         if (err != 0) return nixError(err);
     }
 
     /// Set a list value from a list builder.
-    pub fn setList(self: Self, context: NixContext, builder: ListBuilder) !void {
+    pub fn setList(self: Self, context: *NixContext, builder: ListBuilder) !void {
         const err = libnix.nix_make_list(context.context, builder.builder, self.value);
         if (err != 0) return nixError(err);
     }
 
     /// Get the length of a list.
-    pub fn listSize(self: Self, context: NixContext) !usize {
+    pub fn listSize(self: Self, context: *NixContext) !usize {
         const result = libnix.nix_get_list_size(context.context, self.value);
         try context.errorCode();
         return result;
@@ -218,7 +213,7 @@ pub const Value = struct {
 
     /// Get the element of a list at index `i`. Release this value
     /// using `gc.decref`.
-    pub fn listAtIndex(self: Self, context: NixContext, i: usize) !Value {
+    pub fn listAtIndex(self: Self, context: *NixContext, i: usize) !Value {
         const result = libnix.nix_get_list_byidx(context.context, self.value, self.state.state, @intCast(i));
         if (result) |value| {
             return Value{
@@ -232,7 +227,7 @@ pub const Value = struct {
     }
 
     /// Return a list iterator.
-    pub fn listIterator(self: Self, context: NixContext) !ListIterator {
+    pub fn listIterator(self: Self, context: *NixContext) !ListIterator {
         const size = try self.listSize(context);
 
         return ListIterator{
@@ -242,13 +237,13 @@ pub const Value = struct {
     }
 
     /// Set an attrset value from a attrset bindings builder.
-    pub fn setAttrs(self: Self, context: NixContext, builder: BindingsBuilder) !void {
+    pub fn setAttrs(self: Self, context: *NixContext, builder: BindingsBuilder) !void {
         const err = libnix.nix_make_attrs(context.context, self.value, builder.builder);
         if (err != 0) return nixError(err);
     }
 
     /// Retrieve the element count of an attrset.
-    pub fn attrsetSize(self: Self, context: NixContext) !usize {
+    pub fn attrsetSize(self: Self, context: *NixContext) !usize {
         const result = libnix.nix_get_attrs_size(context.context, self.value);
         try context.errorCode();
         return result;
@@ -257,7 +252,7 @@ pub const Value = struct {
     /// Retrieve a key-value pair from the sorted bindings by index.
     /// Caller does not own `.name`, and must call `gc.decRef` on `.value`
     /// to release the created value.
-    pub fn attrAtIndex(self: Self, context: NixContext, i: usize) !AttrKeyValue {
+    pub fn attrAtIndex(self: Self, context: *NixContext, i: usize) !AttrKeyValue {
         var buf: [*c]u8 = undefined;
         const result = libnix.nix_get_attr_byidx(context.context, self.value, self.state.state, @intCast(i), @ptrCast(&buf));
         if (result) |value| {
@@ -277,7 +272,7 @@ pub const Value = struct {
 
     /// Retrieve an attr value by name. Call `gc.decRef` to release the
     /// created value.
-    pub fn attrByName(self: Self, context: NixContext, name: []const u8) !Value {
+    pub fn attrByName(self: Self, context: *NixContext, name: []const u8) !Value {
         const namez = try self.allocator.dupeZ(u8, name);
         defer self.allocator.free(namez);
 
@@ -296,7 +291,7 @@ pub const Value = struct {
 
     /// Retrieve an attr name by index in the sorted bindings. Avoids
     /// evaluation of the value; caller does not own returned memory.
-    pub fn attrNameAtIndex(self: Self, context: NixContext, i: usize) ![]const u8 {
+    pub fn attrNameAtIndex(self: Self, context: *NixContext, i: usize) ![]const u8 {
         const result = libnix.nix_get_attr_name_byidx(context.context, self.value, self.state.state, @intCast(i));
         if (result) |value| {
             return mem.sliceTo(mem.span(value), 0);
@@ -307,7 +302,7 @@ pub const Value = struct {
     }
 
     /// Check if an attr with the provided name exists in this attrset.
-    pub fn hasAttrWithName(self: Self, context: NixContext, name: []const u8) !bool {
+    pub fn hasAttrWithName(self: Self, context: *NixContext, name: []const u8) !bool {
         const namez = try self.allocator.dupeZ(u8, name);
         defer self.allocator.free(namez);
 
@@ -317,7 +312,7 @@ pub const Value = struct {
     }
 
     /// Return an attrset iterator that iterates over each key-value pair.
-    pub fn attrsetIterator(self: Self, context: NixContext) !AttrsetIterator {
+    pub fn attrsetIterator(self: Self, context: *NixContext) !AttrsetIterator {
         const size = try self.attrsetSize(context);
 
         return AttrsetIterator{
@@ -334,19 +329,19 @@ pub const Value = struct {
 
     /// Get the type name of this value as defined in the evaluator.
     /// Caller does not own returned memory.
-    pub fn typeName(self: Self, context: NixContext) ![]const u8 {
+    pub fn typeName(self: Self, context: *NixContext) ![]const u8 {
         const result = libnix.nix_get_typename(context.context, self.value);
         try context.errorCode();
         return mem.sliceTo(result, 0);
     }
 
     /// Copy the value from another value into this value.
-    pub fn copy(self: Self, context: NixContext, src: Value) !void {
+    pub fn copy(self: Self, context: *NixContext, src: Value) !void {
         const err = libnix.nix_copy_value(context.context, self.value, src.value);
         if (err != 0) return nixError(err);
     }
 
-    pub fn call(self: Self, context: NixContext, args: []const Value) !Value {
+    pub fn call(self: Self, context: *NixContext, args: []const Value) !Value {
         if (args.len < 1) {
             @panic("no arguments provided when calling nix value as a function");
         }
@@ -392,7 +387,7 @@ pub const gc = struct {
     }
 
     /// Increment the garbage collector reference counter for the given object
-    pub fn incRef(comptime T: type, context: NixContext, object: T) NixError!void {
+    pub fn incRef(comptime T: type, context: *NixContext, object: T) NixError!void {
         if (T == Value) {
             const err = libnix.nix_gc_incref(context.context, object.value);
             if (err != 0) return nixError(err);
@@ -402,7 +397,7 @@ pub const gc = struct {
     }
 
     /// Decrement the garbage collector reference counter for the given object.
-    pub fn decRef(comptime T: type, context: NixContext, object: T) NixError!void {
+    pub fn decRef(comptime T: type, context: *NixContext, object: T) NixError!void {
         if (T == Value) {
             const err = libnix.nix_gc_decref(context.context, object.value);
             if (err != 0) return nixError(err);
@@ -418,7 +413,7 @@ pub const ListBuilder = struct {
     const Self = @This();
 
     /// Create a new list value builder.
-    pub fn init(context: NixContext, state: EvalState, capacity: usize) !Self {
+    pub fn init(context: *NixContext, state: EvalState, capacity: usize) !Self {
         const builder = libnix.nix_make_list_builder(context.context, state.state, capacity);
         if (builder == null) {
             try context.errorCode();
@@ -431,7 +426,7 @@ pub const ListBuilder = struct {
     }
 
     /// Insert a value at the given index into this builder.
-    pub fn insert(self: Self, context: NixContext, index: usize, value: Value) NixError!void {
+    pub fn insert(self: Self, context: *NixContext, index: usize, value: Value) NixError!void {
         const err = libnix.nix_list_builder_insert(context.context, self.builder, @intCast(index), value.value);
         if (err != 0) return nixError(err);
     }
@@ -449,7 +444,7 @@ pub const BindingsBuilder = struct {
     const Self = @This();
 
     /// Create a new attrset value (bindings) builder.
-    pub fn init(allocator: Allocator, context: NixContext, state: EvalState, capacity: usize) !Self {
+    pub fn init(allocator: Allocator, context: *NixContext, state: EvalState, capacity: usize) !Self {
         const builder = libnix.nix_make_bindings_builder(context.context, state.state, capacity);
         if (builder == null) {
             try context.errorCode();
@@ -463,7 +458,7 @@ pub const BindingsBuilder = struct {
     }
 
     /// Insert a key-value binding into this builder.
-    pub fn insert(self: Self, context: NixContext, name: []const u8, value: Value) !void {
+    pub fn insert(self: Self, context: *NixContext, name: []const u8, value: Value) !void {
         const namez = try self.allocator.dupeZ(u8, name);
         defer self.allocator.free(namez);
 
@@ -486,7 +481,7 @@ pub const ListIterator = struct {
 
     /// Return the next element in the list as a `Value` if it exists.
     /// Release this value up using `gc.decRef`.
-    pub fn next(self: *Self, context: NixContext) !?Value {
+    pub fn next(self: *Self, context: *NixContext) !?Value {
         if (self.index == self.size) {
             return null;
         }
@@ -508,7 +503,7 @@ pub const AttrsetIterator = struct {
     /// Return the next key-value pair in the attrset as a `AttrKeyValue`
     /// if it exists. Caller does not own returned memory at `.name`;
     /// release the returned value using `gc.decRef`.
-    pub fn next(self: *Self, context: NixContext) !?AttrKeyValue {
+    pub fn next(self: *Self, context: *NixContext) !?AttrKeyValue {
         if (self.index == self.size) {
             return null;
         }
@@ -523,6 +518,7 @@ pub const AttrsetIterator = struct {
 test "eval value from string" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
     const context = resources.context;
     const state = resources.state;
 
@@ -536,6 +532,8 @@ test "eval value from string" {
 test "get/set integer" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -551,6 +549,8 @@ test "get/set integer" {
 test "get/set float" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -566,6 +566,8 @@ test "get/set float" {
 test "get/set bool" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -581,13 +583,15 @@ test "get/set bool" {
 test "get/set string slice" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
     const value = try state.createValue(context);
     try value.setString(context, "Goodbye, cruel world!");
 
-    const actual = try value.string(allocator, context);
+    const actual = try value.string(context);
     defer allocator.free(actual);
     const expected: []const u8 = "Goodbye, cruel world!";
 
@@ -597,6 +601,8 @@ test "get/set string slice" {
 test "get/set path string slice" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -612,6 +618,8 @@ test "get/set path string slice" {
 test "set null" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -624,6 +632,8 @@ test "set null" {
 test "build/set list value" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -637,6 +647,8 @@ test "build/set list value" {
 test "iterate through list" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -655,6 +667,8 @@ test "iterate through list" {
 test "set attrs" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -669,6 +683,8 @@ test "set attrs" {
 test "get attr at index" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -678,7 +694,7 @@ test "get attr at index" {
     const actual_kv = try value.attrAtIndex(context, 2);
     defer gc.decRef(Value, context, actual_kv.value) catch unreachable;
 
-    const actual_value = try actual_kv.value.string(allocator, context);
+    const actual_value = try actual_kv.value.string(context);
     defer allocator.free(actual_value);
 
     try expectEqualSlices(u8, "what", actual_kv.name);
@@ -688,6 +704,8 @@ test "get attr at index" {
 test "get attr by name" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -697,7 +715,7 @@ test "get attr by name" {
     const retrieved_value = try value.attrByName(context, "goodbye");
     defer gc.decRef(Value, context, retrieved_value) catch unreachable;
 
-    const actual = try retrieved_value.string(allocator, context);
+    const actual = try retrieved_value.string(context);
     defer allocator.free(actual);
 
     try expectEqualSlices(u8, "cruel world", actual);
@@ -706,6 +724,8 @@ test "get attr by name" {
 test "get attr name at index" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -718,6 +738,8 @@ test "get attr name at index" {
 test "check if attrset has/does not have attrs" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -736,6 +758,8 @@ const TestKeyValuePair = struct {
 test "iterate through attrset" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -754,7 +778,7 @@ test "iterate through attrset" {
         defer gc.decRef(Value, context, kv.value) catch unreachable;
         try expectEqualSlices(u8, expected_attrs[expected_kv_index].name, kv.name);
 
-        const actual = try kv.value.string(allocator, context);
+        const actual = try kv.value.string(context);
         defer allocator.free(actual);
 
         try expectEqualSlices(u8, expected_attrs[expected_kv_index].value, actual);
@@ -765,6 +789,8 @@ test "iterate through attrset" {
 test "call function with a single argument" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -782,6 +808,8 @@ test "call function with a single argument" {
 test "call function with multiple arguments" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 
@@ -802,6 +830,8 @@ test "call function with multiple arguments" {
 test "call function with incorrect argument type" {
     const allocator = testing.allocator;
     const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
     const context = resources.context;
     const state = resources.state;
 

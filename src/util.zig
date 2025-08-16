@@ -10,7 +10,7 @@ const nixError = errors.nixError;
 const NixError = errors.NixError;
 
 /// Initialize libutil and its dependencies.
-pub fn init(context: NixContext) NixError!void {
+pub fn init(context: *NixContext) NixError!void {
     const err = libnix.nix_libutil_init(context.context);
     if (err != 0) return nixError(err);
 }
@@ -23,7 +23,7 @@ pub fn version() []const u8 {
 pub const settings = struct {
     /// Retrieve a setting from the Nix global configuration.
     /// Caller owns returned memory.
-    pub fn get(allocator: Allocator, context: NixContext, key: []const u8) ![]u8 {
+    pub fn get(allocator: Allocator, context: *NixContext, key: []const u8) ![]u8 {
         const keyz = try allocator.dupeZ(u8, key);
         defer allocator.free(keyz);
 
@@ -36,7 +36,7 @@ pub const settings = struct {
     }
 
     /// Set a setting in the Nix global configuration.
-    pub fn set(allocator: Allocator, context: NixContext, key: []const u8, value: []const u8) !void {
+    pub fn set(allocator: Allocator, context: *NixContext, key: []const u8, value: []const u8) !void {
         const keyz = try allocator.dupeZ(u8, key);
         defer allocator.free(keyz);
 
@@ -62,14 +62,17 @@ pub const NixContext = struct {
     /// Create an instance of NixContext.
     ///
     /// Caller must call deinit() to free memory with the underlying allocator.
-    pub fn init(allocator: Allocator) !Self {
+    pub fn init(allocator: Allocator) !*Self {
         const new_context = libnix.nix_c_context_create();
         if (new_context == null) return error.OutOfMemory;
 
-        return Self{
-            .context = new_context.?,
+        const result = try allocator.create(Self);
+        result.* = .{
             .allocator = allocator,
+            .context = new_context.?,
         };
+
+        return result;
     }
 
     /// Retrieve the most recent error code from this context.
@@ -92,7 +95,7 @@ pub const NixContext = struct {
 
         var data = c.StringDataContainer.new(self.allocator);
 
-        const err = libnix.nix_err_info_msg(scratch_context.context, self.context, c.genericGetStringCallback, &data);
+        const err = libnix.nix_err_info_msg(null, self.context, c.genericGetStringCallback, &data);
         if (err != 0) return nixError(err);
 
         return data.result orelse Allocator.Error.OutOfMemory;
@@ -108,7 +111,7 @@ pub const NixContext = struct {
         const scratch_context = try Self.init(self.allocator);
         defer scratch_context.deinit();
 
-        const message = libnix.nix_err_msg(scratch_context.context, self.context, null);
+        const message = libnix.nix_err_msg(null, self.context, null);
         return if (message) |m| mem.span(m) else null;
     }
 
@@ -126,15 +129,16 @@ pub const NixContext = struct {
 
         var data = c.StringDataContainer.new(self.allocator);
 
-        const err = libnix.nix_err_name(scratch_context.context, self.context, c.genericGetStringCallback, &data);
+        const err = libnix.nix_err_name(null, self.context, c.genericGetStringCallback, &data);
         if (err != 0) return nixError(err);
 
         return data.result orelse Allocator.Error.OutOfMemory;
     }
 
     /// Free the `NixContext`. Does not fail.
-    pub fn deinit(self: Self) void {
+    pub fn deinit(self: *Self) void {
         libnix.nix_c_context_free(self.context);
+        self.allocator.destroy(self);
     }
 };
 
