@@ -18,6 +18,7 @@ const NixContext = util.NixContext;
 
 const lstore = @import("./store.zig");
 const Store = lstore.Store;
+const StorePath = lstore.StorePath;
 
 const c = @import("./c.zig");
 const libnix = c.libnix;
@@ -33,6 +34,7 @@ pub fn init(context: *NixContext) NixError!void {
 
 pub const EvalState = struct {
     state: *libnix.EvalState,
+    store: Store,
     allocator: Allocator,
 
     const Self = @This();
@@ -49,6 +51,7 @@ pub const EvalState = struct {
 
         return Self{
             .state = new_state.?,
+            .store = store,
             .allocator = allocator,
         };
     }
@@ -94,6 +97,7 @@ pub const EvalState = struct {
 
 pub const EvalStateBuilder = struct {
     builder: *libnix.nix_eval_state_builder,
+    store: Store,
     allocator: Allocator,
 
     const Self = @This();
@@ -104,6 +108,7 @@ pub const EvalStateBuilder = struct {
 
         return EvalStateBuilder{
             .builder = builder.?,
+            .store = store,
             .allocator = allocator,
         };
     }
@@ -146,6 +151,7 @@ pub const EvalStateBuilder = struct {
 
         return EvalState{
             .allocator = self.allocator,
+            .store = self.store,
             .state = state.?,
         };
     }
@@ -442,6 +448,20 @@ pub const Value = struct {
         return result;
     }
 
+    /// Realise a string context.
+    ///
+    /// Caller must deinitialize memory with `.deinit()` afterwards.
+    pub fn realiseString(self: Self, context: *NixContext, is_ifd: bool) !RealisedString {
+        const realised_string = libnix.nix_string_realise(context.context, self.state.state, self.value, is_ifd);
+        if (realised_string == null) return error.Failed;
+
+        return RealisedString{
+            .string = realised_string.?,
+            .state = self.state,
+            .allocator = self.allocator,
+        };
+    }
+
     // TODO: make a toOwnedSlice method for stringifying a value.
 };
 
@@ -578,6 +598,81 @@ pub const AttrsetIterator = struct {
         self.index += 1;
 
         return try self.attrset.attrAtIndex(context, current_index);
+    }
+};
+
+pub const RealisedString = struct {
+    string: *libnix.nix_realised_string,
+    state: EvalState,
+    allocator: Allocator,
+
+    const Self = @This();
+
+    /// Obtain the realised string as a Zig string slice.
+    ///
+    /// Caller owns returned memory.
+    pub fn asSlice(self: Self) ![]const u8 {
+        const buf: [*c]const u8 = libnix.nix_realised_string_get_buffer_start(self.string);
+        const end: usize = libnix.nix_realised_string_get_buffer_size(self.string);
+
+        return self.allocator.dupe(u8, buf[0..end]);
+    }
+
+    /// Initialize an iterator for walking the used store paths
+    /// inside of this realised string.
+    ///
+    /// Store paths are returned in an undefined order.
+    pub fn iterator(self: Self) RealisedStringIterator {
+        return RealisedStringIterator{
+            .string = self.string,
+            .i = 0,
+            .count = libnix.nix_realised_string_get_store_path_count(self.string),
+            .allocator = self.allocator,
+            .store = self.state.store,
+        };
+    }
+
+    /// Free this realised string. Does not fail.
+    pub fn deinit(self: Self) void {
+        libnix.nix_realised_string_free(self.string);
+    }
+};
+
+pub const RealisedStringIterator = struct {
+    string: *libnix.nix_realised_string,
+    i: usize = 0,
+    count: usize,
+
+    store: Store,
+    allocator: Allocator,
+
+    const Self = @This();
+
+    /// Obtain the next store path in this realised string.
+    ///
+    /// Returns null when there are no more store paths, or
+    /// an out of memory error if the path is not able to be
+    /// cloned into an mutable store path pointer properly.
+    ///
+    /// Store paths are returned in an undefined order.
+    pub fn next(self: *Self) !?StorePath {
+        if (self.i >= self.count) return null;
+        const path_view = libnix.nix_realised_string_get_store_path(self.string, self.i);
+
+        // Clone this value, since generally users will want an
+        // "owned" variant, so to speak.
+        //
+        // Creating a read-only view (aka a *const StorePath) is
+        // harder to represent using the current semantics around
+        // what a StorePath supports, and cloning the path itself
+        const path = libnix.nix_store_path_clone(path_view) orelse return error.OutOfMemory;
+
+        self.i += 1;
+        return StorePath{
+            .path = path,
+            .store = self.store,
+            .allocator = self.allocator,
+        };
     }
 };
 
