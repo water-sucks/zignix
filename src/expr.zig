@@ -3,6 +3,8 @@ const fmt = std.fmt;
 const mem = std.mem;
 const testing = std.testing;
 const Allocator = mem.Allocator;
+const ArrayList = std.ArrayList;
+const StringHashMap = std.StringHashMap;
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
 const expectEqualSlices = testing.expectEqualSlices;
@@ -35,8 +37,9 @@ pub const EvalState = struct {
 
     const Self = @This();
 
-    /// Create a new Nix state. Caller must call `deinit()` to release memory.
-    // TODO: add search path param
+    /// Create a new Nix state.
+    ///
+    /// Caller must call `deinit()` to release memory.
     pub fn init(allocator: Allocator, context: *NixContext, store: Store) !Self {
         const new_state = libnix.nix_state_create(context.context, null, store.store);
         if (new_state == null) {
@@ -86,6 +89,69 @@ pub const EvalState = struct {
     /// Free this `NixState`. Does not fail.
     pub fn deinit(self: Self) void {
         libnix.nix_state_free(self.state);
+    }
+};
+
+pub const EvalStateBuilder = struct {
+    builder: *libnix.nix_eval_state_builder,
+    allocator: Allocator,
+
+    const Self = @This();
+
+    pub fn init(allocator: Allocator, context: *NixContext, store: Store) !Self {
+        const builder = libnix.nix_eval_state_builder_new(context.context, store.store);
+        if (builder == null) return error.OutOfMemory;
+
+        return EvalStateBuilder{
+            .builder = builder.?,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn loadSettings(self: Self, context: *NixContext) !void {
+        const err = libnix.nix_eval_state_builder_load(context.context, self.builder);
+        if (err != 0) return nixError(err);
+    }
+
+    pub fn setLookupPath(self: Self, context: *NixContext, lookup_paths: StringHashMap([]const u8)) !void {
+        var lookup_path_list = try ArrayList([:0]const u8).initCapacity(self.allocator, lookup_paths.count());
+        defer {
+            for (lookup_path_list.items) |item| {
+                self.allocator.free(item);
+            }
+            lookup_path_list.deinit();
+        }
+
+        var lookup_path_c_list = try self.allocator.alloc([*c]const u8, lookup_paths.count() + 1);
+        defer self.allocator.free(lookup_path_c_list);
+
+        var i: usize = 0;
+        var iter = lookup_paths.iterator();
+        while (iter.next()) |kv| {
+            const val = try fmt.allocPrintZ(self.allocator, "{s}={s}", .{ kv.key_ptr.*, kv.value_ptr.* });
+            lookup_path_list.appendAssumeCapacity(val);
+            lookup_path_c_list[i] = val.ptr;
+            i += 1;
+        }
+
+        lookup_path_c_list[i] = null;
+
+        const err = libnix.nix_eval_state_builder_set_lookup_path(context.context, self.builder, lookup_path_c_list.ptr);
+        if (err != 0) return nixError(err);
+    }
+
+    pub fn build(self: Self, context: *NixContext) !EvalState {
+        const state = libnix.nix_eval_state_build(context.context, self.builder);
+        if (state == null) return error.OutOfMemory;
+
+        return EvalState{
+            .allocator = self.allocator,
+            .state = state.?,
+        };
+    }
+
+    pub fn deinit(self: Self) void {
+        libnix.nix_eval_state_builder_free(self.builder);
     }
 };
 
