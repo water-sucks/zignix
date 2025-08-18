@@ -16,6 +16,23 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(zignix_lib);
 
+    const example_mod = b.createModule(.{
+        .root_source_file = b.path("example/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    example_mod.addImport("zignix", zignix_mod);
+    const example_exe = b.addExecutable(.{
+        .name = "zignix-example",
+        .root_module = example_mod,
+    });
+    b.installArtifact(example_exe);
+
+    example_exe.linkLibC();
+    example_exe.linkSystemLibrary("nix-expr-c");
+    example_exe.linkSystemLibrary("nix-store-c");
+    example_exe.linkSystemLibrary("nix-util-c");
+
     const zignix_tests = b.addTest(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
