@@ -51,4 +51,12 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&test_artifact.step);
+
+    const docs_step = b.step("docs", "Build zignix library docs");
+    const docs = zignix_lib.getEmittedDocs();
+    docs_step.dependOn(&b.addInstallDirectory(.{
+        .source_dir = docs,
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    }).step);
 }
