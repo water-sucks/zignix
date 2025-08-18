@@ -25,4 +25,5 @@ jobs:
 
       - name: Run example executable
         run: |
+          export NIX_PATH="nixpkgs=$(nix flake metadata nixpkgs --json | jq -r .path)"
           nix develop .# -c zig build run
