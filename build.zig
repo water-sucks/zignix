@@ -27,6 +27,10 @@ pub fn build(b: *std.Build) void {
         .root_module = example_mod,
     });
     b.installArtifact(example_exe);
+    const run_artifact = b.addRunArtifact(example_exe);
+
+    const run_step = b.step("run", "Run example executable");
+    run_step.dependOn(&run_artifact.step);
 
     example_exe.linkLibC();
     example_exe.linkSystemLibrary("nix-expr-c");
