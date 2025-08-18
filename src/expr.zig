@@ -393,6 +393,12 @@ pub const Value = struct {
         };
     }
 
+    // Set the value to a thunk that will perform a function application when needed.
+    pub fn apply(self: Self, context: *NixContext, function: Value, arg: Value) !void {
+        const err = libnix.nix_init_apply(context.context, self.value, function.value, arg.value);
+        if (err != 0) return nixError(err);
+    }
+
     /// Get the type of this value.
     pub fn valueType(self: Self) ValueType {
         const result = libnix.nix_get_type(null, self.value);
@@ -460,6 +466,14 @@ pub const Value = struct {
             .state = self.state,
             .allocator = self.allocator,
         };
+    }
+
+    pub fn forceEval(self: Self, context: *NixContext, deep: bool) !void {
+        const err = if (deep)
+            libnix.nix_value_force_deep(context.context, self.state.state, self.value)
+        else
+            libnix.nix_value_force(context.context, self.state.state, self.value);
+        if (err != 0) return nixError(err);
     }
 
     // TODO: make a toOwnedSlice method for stringifying a value.
@@ -1002,4 +1016,61 @@ test "call function with incorrect argument type" {
     try value.setString(context, "hi");
 
     try testing.expectError(error.NixError, function.call(context, &.{value}));
+}
+
+test "force eval shallow" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
+    const context = resources.context;
+    const state = resources.state;
+
+    const function = try state.evalFromString(context, "x: x + 1", ".");
+
+    var arg = try state.createValue(context);
+    try arg.setInt(context, 10);
+
+    var thunk = try state.createValue(context);
+    try thunk.apply(context, function, arg);
+
+    try expectEqual(.thunk, thunk.valueType());
+
+    try thunk.forceEval(context, false);
+    try expectEqual(.int, thunk.valueType());
+    try expectEqual(11, try thunk.int(context));
+}
+
+test "force eval deep" {
+    const allocator = testing.allocator;
+    const resources = try TestUtils.initResources(allocator);
+    defer resources.deinit();
+
+    const context = resources.context;
+    const state = resources.state;
+
+    const function = try state.evalFromString(context,
+        \\x: [ (x + 1) (x + 2) ]
+    , ".");
+
+    var arg = try state.createValue(context);
+    try arg.setInt(context, 10);
+
+    var thunk = try state.createValue(context);
+    try thunk.apply(context, function, arg);
+
+    try expectEqual(.thunk, thunk.valueType());
+
+    try thunk.forceEval(context, true);
+    try expectEqual(.list, thunk.valueType());
+
+    var iter = try thunk.listIterator(context);
+    const val1 = (try iter.next(context)).?;
+    const val2 = (try iter.next(context)).?;
+
+    try expectEqual(.int, val1.valueType());
+    try expectEqual(11, try val1.int(context));
+
+    try expectEqual(.int, val2.valueType());
+    try expectEqual(12, try val2.int(context));
 }
