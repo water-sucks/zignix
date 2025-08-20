@@ -46,6 +46,8 @@ pub fn build(b: *std.Build) void {
 
     zignix_tests.linkLibC();
     zignix_tests.linkSystemLibrary("nix-expr-c");
+    zignix_tests.linkSystemLibrary("nix-fetchers-c");
+    zignix_tests.linkSystemLibrary("nix-flake-c");
     zignix_tests.linkSystemLibrary("nix-store-c");
     zignix_tests.linkSystemLibrary("nix-util-c");
 
