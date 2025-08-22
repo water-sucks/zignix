@@ -20,6 +20,9 @@ const lstore = @import("./store.zig");
 const Store = lstore.Store;
 const StorePath = lstore.StorePath;
 
+const flake = @import("./flake.zig");
+const FlakeSettings = flake.FlakeSettings;
+
 const c = @import("./c.zig");
 const libnix = c.libnix;
 
@@ -102,6 +105,12 @@ pub const EvalStateBuilder = struct {
 
     const Self = @This();
 
+    /// Initialize a new Nix state builder.
+    ///
+    /// Called must call `build()` to finish creating an EvalState value.
+    ///
+    /// Also remember to call `deinit()` to release used memory, even after
+    /// calling `build()`.
     pub fn init(allocator: Allocator, context: *NixContext, store: Store) !Self {
         const builder = libnix.nix_eval_state_builder_new(context.context, store.store);
         if (builder == null) return error.OutOfMemory;
@@ -113,11 +122,21 @@ pub const EvalStateBuilder = struct {
         };
     }
 
+    /// Read settings from the ambient environment.
+    ///
+    /// Settings are sourced from environment variables and
+    /// configuration files, as documented in the Nix manual.
     pub fn loadSettings(self: Self, context: *NixContext) !void {
         const err = libnix.nix_eval_state_builder_load(context.context, self.builder);
         if (err != 0) return nixError(err);
     }
 
+    /// Set the lookup path for <...> expressions.
+    ///
+    /// Lookup paths are passed as a map, with the key being the name and the
+    /// value being the path or other resource that the name leads to.
+    ///
+    /// This corresponds to entries in NIX_PATH.
     pub fn setLookupPath(self: Self, context: *NixContext, lookup_paths: StringHashMap([]const u8)) !void {
         var lookup_path_list = try ArrayList([:0]const u8).initCapacity(self.allocator, lookup_paths.count());
         defer {
@@ -145,6 +164,16 @@ pub const EvalStateBuilder = struct {
         if (err != 0) return nixError(err);
     }
 
+    /// Add flake-related functions and other facilities, such as
+    /// as builtins.getFlake (and potentially more).
+    pub fn addFlakeSettings(self: Self, context: *NixContext, settings: FlakeSettings) !void {
+        const err = libnix.nix_flake_settings_add_to_eval_state_builder(context.context, settings.settings, self.builder);
+        if (err != 0) return nixError(err);
+    }
+
+    /// Create a new Nix language evaluator state.
+    ///
+    /// Remember to call `deinit()` afterwards.
     pub fn build(self: Self, context: *NixContext) !EvalState {
         const state = libnix.nix_eval_state_build(context.context, self.builder);
         if (state == null) return error.OutOfMemory;
@@ -156,6 +185,7 @@ pub const EvalStateBuilder = struct {
         };
     }
 
+    /// Free a nix_eval_state_builder. Does not fail.
     pub fn deinit(self: Self) void {
         libnix.nix_eval_state_builder_free(self.builder);
     }

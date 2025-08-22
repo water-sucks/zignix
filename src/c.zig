@@ -7,6 +7,8 @@ pub const libnix = @cImport({
     @cInclude("nix_api_expr.h");
     @cInclude("nix_api_store.h");
     @cInclude("nix_api_value.h");
+    @cInclude("nix_api_flake.h");
+    @cInclude("nix_api_fetchers.h");
 });
 
 /// A container for retrieving and duplicating strings inside of Nix string
