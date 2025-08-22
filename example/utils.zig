@@ -5,13 +5,9 @@ const StringHashMap = std.StringHashMap;
 const print = std.debug.print;
 
 const zignix = @import("zignix");
-const NixContext = zignix.NixContext;
-const NixStore = zignix.store.Store;
-const EvalState = zignix.expr.EvalState;
-const EvalStateBuilder = zignix.expr.EvalStateBuilder;
 
-pub fn initEvalStateFromNixPath(allocator: Allocator, context: *NixContext, store: NixStore) !EvalState {
-    const builder = EvalStateBuilder.init(allocator, context, store) catch |err| {
+pub fn initEvalStateFromNixPath(allocator: Allocator, context: *zignix.NixContext, store: zignix.NixStore) !zignix.EvalState {
+    const builder = zignix.EvalStateBuilder.init(allocator, context, store) catch |err| {
         print("error: failed to initialize nix eval state builder: {}\n", .{err});
         return err;
     };

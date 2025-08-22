@@ -4,19 +4,14 @@ const builtin = @import("builtin");
 const print = std.debug.print;
 
 const zignix = @import("zignix");
-const NixContext = zignix.util.NixContext;
-const NixStore = zignix.store.Store;
-const EvalState = zignix.expr.EvalState;
-const EvalStateBuilder = zignix.expr.EvalStateBuilder;
-const FlakeSettings = zignix.flake.FlakeSettings;
-const FlakeRefParseFlags = zignix.flake.FlakeRefParseFlags;
-const FlakeLockFlags = zignix.flake.FlakeLockFlags;
-const FlakeRef = zignix.flake.FlakeReference;
-const NixValue = zignix.expr.Value;
-const gc = zignix.expr.gc;
 
-fn initEvalState(allocator: Allocator, context: *NixContext, store: NixStore, flake_settings: *FlakeSettings) !EvalState {
-    const builder = EvalStateBuilder.init(allocator, context, store) catch |err| {
+fn initEvalState(
+    allocator: Allocator,
+    context: *zignix.NixContext,
+    store: zignix.NixStore,
+    flake_settings: *zignix.FlakeSettings,
+) !zignix.EvalState {
+    const builder = zignix.EvalStateBuilder.init(allocator, context, store) catch |err| {
         print("error: failed to initialize nix eval state builder: {}\n", .{err});
         return err;
     };
@@ -49,7 +44,7 @@ pub fn main() !u8 {
     }
     const allocator = gpa.allocator();
 
-    const context = try NixContext.init(allocator);
+    const context = try zignix.NixContext.init(allocator);
     defer context.deinit();
 
     zignix.init(context) catch {
@@ -58,14 +53,14 @@ pub fn main() !u8 {
         return 1;
     };
 
-    const nix_store = NixStore.open(allocator, context, "", .{}) catch {
+    const nix_store = zignix.NixStore.open(allocator, context, "", .{}) catch {
         const msg = context.errorMessage() catch "(failed to retrieve error message from context)";
         print("error: failed to open nix store: {s}\n", .{msg.?});
         return 1;
     };
     defer nix_store.deinit();
 
-    var flake_settings = try FlakeSettings.init(context);
+    var flake_settings = try zignix.FlakeSettings.init(context);
     defer flake_settings.deinit();
 
     print("Using a flake and its output attributes\n", .{});
@@ -74,23 +69,23 @@ pub fn main() !u8 {
     const eval_state = initEvalState(allocator, context, nix_store, &flake_settings) catch return 1;
     defer eval_state.deinit();
 
-    var parse_flags = try FlakeRefParseFlags.init(allocator, context, &flake_settings, eval_state);
+    var parse_flags = try zignix.FlakeRefParseFlags.init(allocator, context, &flake_settings, eval_state);
     defer parse_flags.deinit();
 
-    var lock_flags = try FlakeLockFlags.init(allocator, context, &flake_settings, eval_state);
+    var lock_flags = try zignix.FlakeLockFlags.init(allocator, context, &flake_settings, eval_state);
     defer lock_flags.deinit();
 
-    const ref = try FlakeRef.fromSlice(allocator, context, "github:nixos/nixpkgs/nixos-unstable", &parse_flags);
+    const ref = try zignix.FlakeReference.fromSlice(allocator, context, "github:nixos/nixpkgs/nixos-unstable", &parse_flags);
     defer ref.deinit();
 
     const locked_ref = try ref.lock(context, &lock_flags);
     defer locked_ref.deinit();
 
     const outputs = try locked_ref.outputAttrs(context);
-    defer gc.decRef(NixValue, context, outputs) catch unreachable;
+    defer zignix.gc.decRef(zignix.NixValue, context, outputs) catch unreachable;
 
     const revision = try outputs.attrByName(context, "rev");
-    defer gc.decRef(NixValue, context, revision) catch unreachable;
+    defer zignix.gc.decRef(zignix.NixValue, context, revision) catch unreachable;
 
     const rev = try revision.string(context);
     defer allocator.free(rev);

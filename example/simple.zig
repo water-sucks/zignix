@@ -3,10 +3,6 @@ const print = std.debug.print;
 const builtin = @import("builtin");
 
 const zignix = @import("zignix");
-const NixContext = zignix.NixContext;
-const NixStore = zignix.store.Store;
-const EvalState = zignix.expr.EvalState;
-const NixValue = zignix.expr.Value;
 const gc = zignix.expr.gc;
 
 pub fn main() !u8 {
@@ -19,7 +15,7 @@ pub fn main() !u8 {
     }
     const allocator = gpa.allocator();
 
-    const context = try NixContext.init(allocator);
+    const context = try zignix.NixContext.init(allocator);
     defer context.deinit();
 
     zignix.init(context) catch {
@@ -31,7 +27,7 @@ pub fn main() !u8 {
     print("Evaluating a simple expression\n", .{});
     print("------------------------------\n", .{});
 
-    const nix_store = NixStore.open(allocator, context, "", .{}) catch {
+    const nix_store = zignix.NixStore.open(allocator, context, "", .{}) catch {
         const msg = context.errorMessage() catch "(failed to retrieve error message from context)";
         print("error: failed to open nix store: {s}\n", .{msg.?});
         return 1;
@@ -47,11 +43,11 @@ pub fn main() !u8 {
 
     print("opened nix store :: url '{s}', dir '{s}' version '{s}'\n", .{ store_uri, store_dir, store_version });
 
-    const eval_state = EvalState.init(allocator, context, nix_store) catch return 1;
+    const eval_state = zignix.EvalState.init(allocator, context, nix_store) catch return 1;
     defer eval_state.deinit();
 
     const value = try eval_state.evalFromString(context, "1 + 1", ".");
-    defer gc.decRef(NixValue, context, value) catch unreachable;
+    defer gc.decRef(zignix.NixValue, context, value) catch unreachable;
 
     print("1 + 1 = {d}\n", .{try value.int(context)});
 

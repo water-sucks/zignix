@@ -3,9 +3,6 @@ const print = std.debug.print;
 const builtin = @import("builtin");
 
 const zignix = @import("zignix");
-const NixContext = zignix.NixContext;
-const NixStore = zignix.store.Store;
-const EvalState = zignix.expr.EvalState;
 const gc = zignix.expr.gc;
 
 const utils = @import("./utils.zig");
@@ -20,7 +17,7 @@ pub fn main() !u8 {
     }
     const allocator = gpa.allocator();
 
-    const context = try NixContext.init(allocator);
+    const context = try zignix.NixContext.init(allocator);
     defer context.deinit();
 
     zignix.init(context) catch {
@@ -29,7 +26,7 @@ pub fn main() !u8 {
         return 1;
     };
 
-    const nix_store = NixStore.open(allocator, context, "", .{}) catch {
+    const nix_store = zignix.NixStore.open(allocator, context, "", .{}) catch {
         const msg = context.errorMessage() catch "(failed to retrieve error message from context)";
         print("error: failed to open Nix store: {s}\n", .{msg.?});
         return 1;

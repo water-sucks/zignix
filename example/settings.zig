@@ -3,7 +3,6 @@ const print = std.debug.print;
 const builtin = @import("builtin");
 
 const zignix = @import("zignix");
-const NixContext = zignix.NixContext;
 
 const nonexistent_setting = "nonexistent";
 const experimental_features_setting = "experimental-features";
@@ -18,7 +17,7 @@ pub fn main() !u8 {
     }
     const allocator = gpa.allocator();
 
-    const context = try NixContext.init(allocator);
+    const context = try zignix.NixContext.init(allocator);
     defer context.deinit();
 
     zignix.util.init(context) catch {
