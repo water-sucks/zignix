@@ -1,6 +1,13 @@
 const std = @import("std");
 const fmt = std.fmt;
-const fs = std.fs;
+
+const examples: []const []const u8 = &.{
+    "simple",
+    "settings",
+    "drvpath",
+    "string-context",
+    "flake",
+};
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -24,13 +31,7 @@ pub fn build(b: *std.Build) !void {
     });
     b.installArtifact(zignix_lib);
 
-    var example_dir = try fs.cwd().openDir("example/", .{ .iterate = true });
-    defer example_dir.close();
-
-    var iter = example_dir.iterate();
-    while (try iter.next()) |entry| {
-        const name = fs.path.stem(entry.name);
-
+    for (examples) |name| {
         try buildExample(b, .{
             .name = name,
             .target = target,
