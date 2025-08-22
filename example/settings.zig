@@ -42,10 +42,9 @@ pub fn main() !u8 {
     _ = zignix.util.settings.get(allocator, context, nonexistent_setting) catch |err| {
         if (err == error.Key) {
             print("error: setting '{s}' does not exist\n", .{nonexistent_setting});
-            return 1;
+        } else {
+            unreachable;
         }
-
-        unreachable;
     };
 
     const experimental_features = try zignix.util.settings.get(allocator, context, experimental_features_setting);

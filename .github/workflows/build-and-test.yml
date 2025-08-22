@@ -19,11 +19,18 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Build and run tests
+      - name: Run tests
         run: |
           nix develop .# -c zig build test
 
-      - name: Run example executable
+      - name: Build example executables
+        run: |
+          nix develop .# -c zig build
+
+      - name: Run example executables
         run: |
           export NIX_PATH="nixpkgs=$(nix flake metadata nixpkgs --json | jq -r .path)"
-          nix develop .# -c zig build run
+          for executable in zig-out/bin/*; do
+            echo "\$ $exectuable"
+            $executable
+          done
