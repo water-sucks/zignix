@@ -1,6 +1,8 @@
 const std = @import("std");
+const fmt = std.fmt;
+const fs = std.fs;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -8,7 +10,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
+    zignix_mod.linkSystemLibrary("nix-expr-c", .{});
+    zignix_mod.linkSystemLibrary("nix-fetchers-c", .{});
+    zignix_mod.linkSystemLibrary("nix-flake-c", .{});
+    zignix_mod.linkSystemLibrary("nix-store-c", .{});
+    zignix_mod.linkSystemLibrary("nix-util-c", .{});
 
     const zignix_lib = b.addStaticLibrary(.{
         .name = "zignix",
@@ -16,40 +24,25 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(zignix_lib);
 
-    const example_mod = b.createModule(.{
-        .root_source_file = b.path("example/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    example_mod.addImport("zignix", zignix_mod);
-    const example_exe = b.addExecutable(.{
-        .name = "zignix-example",
-        .root_module = example_mod,
-    });
-    b.installArtifact(example_exe);
-    const run_artifact = b.addRunArtifact(example_exe);
+    var example_dir = try fs.cwd().openDir("example/", .{ .iterate = true });
+    defer example_dir.close();
 
-    const run_step = b.step("run", "Run example executable");
-    run_step.dependOn(&run_artifact.step);
+    var iter = example_dir.iterate();
+    while (try iter.next()) |entry| {
+        const name = fs.path.stem(entry.name);
 
-    example_exe.linkLibC();
-    example_exe.linkSystemLibrary("nix-expr-c");
-    example_exe.linkSystemLibrary("nix-store-c");
-    example_exe.linkSystemLibrary("nix-util-c");
+        try buildExample(b, .{
+            .name = name,
+            .target = target,
+            .optimize = optimize,
+            .zignix = zignix_mod,
+        });
+    }
 
     const zignix_tests = b.addTest(.{
-        .root_source_file = b.path("src/lib.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = zignix_mod,
     });
     const test_artifact = b.addRunArtifact(zignix_tests);
-
-    zignix_tests.linkLibC();
-    zignix_tests.linkSystemLibrary("nix-expr-c");
-    zignix_tests.linkSystemLibrary("nix-fetchers-c");
-    zignix_tests.linkSystemLibrary("nix-flake-c");
-    zignix_tests.linkSystemLibrary("nix-store-c");
-    zignix_tests.linkSystemLibrary("nix-util-c");
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&test_artifact.step);
@@ -61,4 +54,29 @@ pub fn build(b: *std.Build) void {
         .install_dir = .prefix,
         .install_subdir = "docs",
     }).step);
+}
+
+const BuildExampleOptions = struct {
+    name: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    zignix: *std.Build.Module,
+};
+
+fn buildExample(b: *std.Build, options: BuildExampleOptions) !void {
+    const root_source_file = try fmt.allocPrint(b.allocator, "example/{s}.zig", .{options.name});
+    const exec_name = try fmt.allocPrint(b.allocator, "example-{s}", .{options.name});
+
+    const mod = b.createModule(.{
+        .root_source_file = b.path(root_source_file),
+        .target = options.target,
+        .optimize = options.optimize,
+    });
+    mod.addImport("zignix", options.zignix);
+
+    const exe = b.addExecutable(.{
+        .name = exec_name,
+        .root_module = mod,
+    });
+    b.installArtifact(exe);
 }
