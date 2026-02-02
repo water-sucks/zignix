@@ -6,7 +6,7 @@
 
     flake-parts.url = "github:hercules-ci/flake-parts";
 
-    nix.url = "github:nixos/nix/2.30.2";
+    nix.url = "github:nixos/nix/2.33.1";
 
     flake-compat = {
       url = "github:edolstra/flake-compat";
@@ -35,7 +35,7 @@
         devShells.default = pkgs.mkShell {
           name = "zignix-shell";
 
-          nativeBuildInputs = [
+          packages = [
             zig
             pkg-config
           ];
@@ -43,6 +43,10 @@
           buildInputs = [
             nixPackage.dev
           ];
+
+          shellHook = ''
+            export ZIG_GLOBAL_CACHE_DIR="$(pwd)/.zig-cache"
+          '';
         };
       };
     };

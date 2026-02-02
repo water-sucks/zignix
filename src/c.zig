@@ -35,7 +35,7 @@ pub export fn genericGetStringCallback(
     start: [*c]const u8,
     n: c_uint,
     user_data: ?*anyopaque,
-) callconv(.C) void {
+) callconv(.c) void {
     const data: *StringDataContainer = @ptrCast(@alignCast(user_data.?));
 
     const slice = start[0..n];

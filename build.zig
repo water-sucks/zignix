@@ -25,9 +25,10 @@ pub fn build(b: *std.Build) !void {
     zignix_mod.linkSystemLibrary("nix-store-c", .{});
     zignix_mod.linkSystemLibrary("nix-util-c", .{});
 
-    const zignix_lib = b.addStaticLibrary(.{
+    const zignix_lib = b.addLibrary(.{
         .name = "zignix",
         .root_module = zignix_mod,
+        .linkage = .static,
     });
     b.installArtifact(zignix_lib);
 

@@ -191,7 +191,7 @@ pub const StorePath = struct {
         };
     }
 
-    export fn realiseCallback(user_data: ?*anyopaque, out_name: [*c]const u8, out: [*c]const u8) callconv(.C) void {
+    export fn realiseCallback(user_data: ?*anyopaque, out_name: [*c]const u8, out: [*c]const u8) callconv(.c) void {
         const data: *StorePath.RealisedPathContainer = @ptrCast(@alignCast(user_data.?));
 
         data.name = data.allocator.dupe(u8, mem.sliceTo(mem.span(out_name), 0)) catch null;

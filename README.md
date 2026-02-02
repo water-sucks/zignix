@@ -2,10 +2,14 @@
 
 Zig bindings to the Nix package manager.
 
-Built based on the latest stable Nix version.
+Built based on the latest stable Nix version (2.33.1 at time of writing).
 
 Documentation for the raw C API these bindings is based off of is available from
-the [Hydra](https://hydra.nixos.org/build/303305734/download/1/html/) cache.
+the [Hydra](https://hydra.nixos.org/build/316133169/download/1/html/) cache.
+
+You can find the link for these docs by going to https://hydra.nixos.org,
+looking for the Nix job set, and searching for `external-api-docs` in the built
+artifacts.
 
 This repository is hosted on [sr.ht](sr.ht/~watersucks/optnix), with an official
 mirror on [GitHub](https://github.com/water-sucks/optnix).
