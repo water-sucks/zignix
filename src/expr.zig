@@ -3,7 +3,7 @@ const fmt = std.fmt;
 const mem = std.mem;
 const testing = std.testing;
 const Allocator = mem.Allocator;
-const ArrayList = std.ArrayList;
+const ArrayList = std.array_list.Managed;
 const StringHashMap = std.StringHashMap;
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
@@ -152,7 +152,7 @@ pub const EvalStateBuilder = struct {
         var i: usize = 0;
         var iter = lookup_paths.iterator();
         while (iter.next()) |kv| {
-            const val = try fmt.allocPrintZ(self.allocator, "{s}={s}", .{ kv.key_ptr.*, kv.value_ptr.* });
+            const val = try fmt.allocPrintSentinel(self.allocator, "{s}={s}", .{ kv.key_ptr.*, kv.value_ptr.* }, 0);
             lookup_path_list.appendAssumeCapacity(val);
             lookup_path_c_list[i] = val.ptr;
             i += 1;

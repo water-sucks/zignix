@@ -127,14 +127,14 @@ pub const Store = struct {
 
 pub const RealisedPath = struct {
     name: []const u8,
-    out_path: []const u8,
+    out: StorePath,
     allocator: Allocator,
 
     const Self = @This();
 
     pub fn deinit(self: Self) void {
         self.allocator.free(self.name);
-        self.allocator.free(self.out_path);
+        self.out.deinit();
     }
 };
 
@@ -151,8 +151,7 @@ pub const StorePath = struct {
     pub fn name(self: Self) ![]const u8 {
         var string_data = c.StringDataContainer.new(self.allocator);
 
-        const err = libnix.nix_store_path_name(self.path, c.genericGetStringCallback, &string_data);
-        if (err != 0) return nixError(err);
+        libnix.nix_store_path_name(self.path, c.genericGetStringCallback, &string_data);
 
         return string_data.result orelse Allocator.Error.OutOfMemory;
     }
@@ -191,23 +190,19 @@ pub const StorePath = struct {
         };
     }
 
-    export fn realiseCallback(user_data: ?*anyopaque, out_name: [*c]const u8, out: [*c]const u8) callconv(.c) void {
+    export fn realiseCallback(user_data: ?*anyopaque, out_name: [*c]const u8, out: ?*const libnix.StorePath) callconv(.c) void {
         const data: *StorePath.RealisedPathContainer = @ptrCast(@alignCast(user_data.?));
 
         data.name = data.allocator.dupe(u8, mem.sliceTo(mem.span(out_name), 0)) catch null;
-        data.out_path = data.allocator.dupe(u8, mem.sliceTo(mem.span(out), 0)) catch null;
+        data.out_path = out;
     }
 
     const RealisedPathContainer = struct {
         name: ?[]const u8,
-        out_path: ?[]const u8,
+        out_path: ?*const libnix.StorePath,
         allocator: Allocator,
 
         pub fn deinit(self: @This()) void {
-            if (self.out_path) |path| {
-                self.allocator.free(path);
-            }
-
             if (self.name) |n| {
                 self.allocator.free(n);
             }
@@ -221,7 +216,7 @@ pub const StorePath = struct {
     pub fn realise(
         self: Self,
         context: *NixContext,
-    ) NixError!RealisedPath {
+    ) !RealisedPath {
         var container = StorePath.RealisedPathContainer{
             .name = null,
             .out_path = null,
@@ -232,9 +227,15 @@ pub const StorePath = struct {
         const err = libnix.nix_store_realise(context.context, self.store.store, self.path, &container, StorePath.realiseCallback);
         if (err != 0) return nixError(err);
 
+        const cloned_path = libnix.nix_store_path_clone(container.out_path.?) orelse return error.OutOfMemory;
+
         return RealisedPath{
             .name = container.name.?,
-            .out_path = container.out_path.?,
+            .out = StorePath{
+                .allocator = self.allocator,
+                .store = self.store,
+                .path = cloned_path,
+            },
             .allocator = container.allocator,
         };
     }

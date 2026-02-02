@@ -71,7 +71,9 @@ pub fn main() !u8 {
     };
     defer realised_path.deinit();
 
-    print("realized path :: {s} @ {s}\n", .{ realised_path.name, realised_path.out_path });
+    const realised_name = try realised_path.out.name();
+    defer allocator.free(realised_name);
+    print("realized path :: {s} @ {s}\n", .{ realised_path.name, realised_name });
 
     return 0;
 }
