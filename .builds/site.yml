@@ -1,0 +1,36 @@
+image: nixos/unstable
+
+secrets:
+  - f96f4a76-c683-45ab-9786-b5b47cfd53fd
+
+packages:
+  - nixos.netlify-cli
+
+environment:
+  NIX_CONFIG: 'experimental-features = nix-command flakes'
+  NETLIFY_SITE_ID: 'c44c4a6b-49c9-4e43-8633-cd538bd5136e'
+
+sources:
+  - https://git.sr.ht/~watersucks/zignix
+
+tasks:
+  - build: |
+      cd ~/zignix
+      nix develop .# -c zig build docs
+  - deploy: |
+      cd ~/zignix
+      if [ "$(git rev-parse origin/main)" != "$(git rev-parse HEAD)" ]; then \
+        complete-build; \
+      fi
+      {
+        set +x
+        . ~/.netlify-secrets
+        set -x
+      }
+      export NETLIFY_AUTH_TOKEN
+      netlify deploy --site=$NETLIFY_SITE_ID --dir=./zig-out/docs --prod --no-build
+
+triggers:
+  - action: email
+    condition: failure
+    to: '<~watersucks/zignix-devel@lists.sr.ht>'

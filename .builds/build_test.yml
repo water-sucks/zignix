@@ -1,0 +1,36 @@
+image: nixos/unstable
+
+secrets:
+  - 01c7bc41-339a-4137-b86e-67f12814e674
+
+packages:
+  - nixos.cachix
+
+sources:
+  - https://git.sr.ht/~watersucks/zignix
+
+environment:
+  NIX_CONFIG: 'experimental-features = nix-command flakes'
+
+tasks:
+  - setup: |
+      {
+        set +x
+        . ~/.cachix-secrets
+        set -x
+      }
+      export CACHIX_AUTH_TOKEN
+      cachix use watersucks
+  - test: |
+      cd ~/zignix
+      nix develop .# -c zig build test
+  - build: |
+      cd ~/zignix
+      nix develop .# -c zig build
+  - run: |
+      cd ~/zignix
+      export NIX_PATH="nixpkgs=$(nix flake metadata nixpkgs --json | jq -r .path)"
+      for executable in zig-out/bin/*; do
+        echo "\$ $exectuable"
+        $executable
+      done
