@@ -24,6 +24,8 @@ pub fn main() !u8 {
         return 1;
     };
 
+    try zignix.util.setVerbosity(context, .vomit);
+
     print("Evaluating a simple expression\n", .{});
     print("------------------------------\n", .{});
 

@@ -48,6 +48,22 @@ pub const settings = struct {
     }
 };
 
+const VerbosityLevel = enum(u8) {
+    @"error",
+    warn,
+    notice,
+    info,
+    talkative,
+    chatty,
+    debug,
+    vomit,
+};
+
+pub fn setVerbosity(context: *NixContext, level: VerbosityLevel) NixError!void {
+    const err = libnix.nix_set_verbosity(context.context, @intFromEnum(level));
+    if (err != 0) return nixError(err);
+}
+
 /// Nix error state.
 ///
 /// Use this to handle/diagnose errors from Nix code itself.
