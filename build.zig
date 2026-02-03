@@ -4,7 +4,8 @@ const fmt = std.fmt;
 const examples: []const []const u8 = &.{
     "simple",
     "settings",
-    "drvpath",
+    "eval-realise",
+    "derivation",
     "string-context",
     "flake",
 };

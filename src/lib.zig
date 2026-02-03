@@ -21,6 +21,7 @@ pub const store = @import("./store.zig");
 pub const NixStore = store.Store;
 pub const RealisedPath = store.RealisedPath;
 pub const StorePath = store.StorePath;
+pub const Derivation = store.Derivation;
 pub const util = @import("./util.zig");
 pub const NixContext = util.NixContext;
 pub const settings = util.settings;

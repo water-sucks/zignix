@@ -190,6 +190,15 @@ pub const StorePath = struct {
         };
     }
 
+    pub fn getDrv(self: Self, context: NixContext) !Derivation {
+        const drv = libnix.nix_store_drv_from_store_path(context.context, self.store.store, self.path) orelse return error.OutOfMemory;
+
+        return Derivation{
+            .store = self.store,
+            .drv = drv,
+        };
+    }
+
     export fn realiseCallback(user_data: ?*anyopaque, out_name: [*c]const u8, out: ?*const libnix.StorePath) callconv(.c) void {
         const data: *StorePath.RealisedPathContainer = @ptrCast(@alignCast(user_data.?));
 
@@ -243,5 +252,69 @@ pub const StorePath = struct {
     // Deallocate this StorePath. Does not fail.
     pub fn deinit(self: Self) void {
         libnix.nix_store_path_free(self.path);
+    }
+};
+
+pub const Derivation = struct {
+    drv: *libnix.nix_derivation,
+    allocator: Allocator,
+
+    const Self = @This();
+
+    // Create a Nix derivation from a JSON-formatted representation
+    // of that derivation.
+    //
+    // Unlike toJSON(), this needs a Store. This is because over time,
+    // we expect the internal representation of derivations in Nix to
+    // differ from accepted derivation formats.
+    //
+    // The store argument is here to help any logic needed to convert
+    // from JSON to the internal representation, in excess of just parsing.
+    pub fn fromJSON(allocator: Allocator, context: *NixContext, store: *Store, input: []const u8) !Self {
+        const inputZ = try allocator.dupeZ(u8, input);
+        defer allocator.free(inputZ);
+
+        const drv = libnix.nix_derivation_from_json(context.context, store.store, inputZ.ptr) orelse {
+            try context.errorCode();
+            return Allocator.Error.OutOfMemory;
+        };
+
+        return Self{
+            .drv = drv,
+            .allocator = allocator,
+        };
+    }
+
+    // Add the given derivation to the provided Nix store.
+    //
+    // Returns the added store path, or an error on failure.
+    pub fn addToStore(self: Self, context: *NixContext, store: *Store) !StorePath {
+        const path = libnix.nix_add_derivation(context.context, store.store, self.drv) orelse {
+            try context.errorCode();
+            return Allocator.Error.OutOfMemory;
+        };
+
+        return StorePath{
+            .allocator = self.allocator,
+            .path = path,
+            .store = store.*,
+        };
+    }
+
+    // Serialize this derivation as a JSON-formatted representation.
+    //
+    // Caller owns returned memory.
+    pub fn toJSON(self: Self, context: *NixContext) ![]const u8 {
+        var string_data = c.StringDataContainer.new(self.allocator);
+
+        const err = libnix.nix_derivation_to_json(context.context, self.path, c.genericGetStringCallback, &string_data);
+        if (err != 0) return nixError(err);
+
+        return string_data.result orelse Allocator.Error.OutOfMemory;
+    }
+
+    // Deallocate this derivation. Does not fail.
+    pub fn deinit(self: Self) void {
+        libnix.nix_derivation_free(self.drv);
     }
 };

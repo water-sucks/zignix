@@ -35,8 +35,8 @@ pub fn main() !u8 {
     const eval_state = try utils.initEvalStateFromNixPath(allocator, context, nix_store);
     defer eval_state.deinit();
 
-    print("Realising a single derivation using .drvPath\n", .{});
-    print("--------------------------------------------\n", .{});
+    print("Evaluating and realising a derivation attribute\n", .{});
+    print("-----------------------------------------------\n", .{});
 
     const expr = "let pkgs = import <nixpkgs> {}; in pkgs.hello.drvPath";
     print("> {s}\n", .{expr});
