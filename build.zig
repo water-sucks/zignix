@@ -6,6 +6,7 @@ const examples: []const []const u8 = &.{
     "settings",
     "eval-realise",
     "derivation",
+    "closure",
     "string-context",
     "flake",
 };

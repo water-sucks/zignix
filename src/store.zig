@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const ArrayList = std.array_list.Managed;
 
 const util = @import("./util.zig");
 const NixContext = util.NixContext;
@@ -199,8 +200,91 @@ pub const StorePath = struct {
         };
     }
 
+    /// Optional parameters for the getFSClosure() function.
+    const FSClosureOptions = struct {
+        /// The direction of closures to compute.
+        ///
+        /// The forward closure is paths referenced by any store
+        /// path in the closure, while the backward closure is
+        /// paths that reference any store path in the closure.
+        direction: enum { forward, backward } = .forward,
+
+        /// If computing the forward closure: for any derivation
+        /// in the closure, include its outputs.
+        ///
+        /// If computing the backward closure: for any output in
+        /// the closure, include derivations that produce it.
+        include_outputs: bool = false,
+
+        /// If computing the forward closure: for any output in the
+        /// closure, include the derivation that produced it.
+        ///
+        /// If computing the backward closure: for any derivation in the
+        /// closure, include its outputs.
+        include_derivers: bool = false,
+    };
+
+    /// Create an iterator over the closure of a specific store path.
+    ///
+    /// Caller owns returned memory, and must call `deinit()` to release
+    /// the resources associated with the iterator.
+    ///
+    /// FIXME: this currently loads all store paths into memory, and
+    /// doesn't do true lazy iteration. When Nix releases a streaming
+    /// variant of iterating the closure paths, this function should
+    /// be updated accordingly.
+    pub fn getFSClosure(self: Self, context: *NixContext, options: FSClosureOptions) !ClosureIterator {
+        const flip_direction = switch (options.direction) {
+            .forward => false,
+            .backward => true,
+        };
+
+        var paths: ArrayList(StorePath) = .init(self.allocator);
+        errdefer {
+            for (paths.items) |path| {
+                path.deinit();
+            }
+            paths.deinit();
+        }
+
+        var container = FSClosureCallbackContainer{
+            .paths = &paths,
+            .store = self.store,
+            .allocator = self.allocator,
+        };
+
+        const err = libnix.nix_store_get_fs_closure(context.context, self.store.store, self.path, flip_direction, options.include_outputs, options.include_derivers, &container, fsClosureCallback);
+        if (err != 0) return nixError(err);
+
+        return ClosureIterator{
+            .allocator = self.allocator,
+            .paths = try paths.toOwnedSlice(),
+        };
+    }
+
+    export fn fsClosureCallback(context: ?*libnix.nix_c_context, user_data: ?*anyopaque, store_path: ?*const libnix.StorePath) callconv(.c) void {
+        _ = context;
+
+        const data: *FSClosureCallbackContainer = @ptrCast(@alignCast(user_data.?));
+
+        const path_to_add = libnix.nix_store_path_clone(store_path);
+        if (path_to_add) |path| {
+            data.paths.append(StorePath{
+                .allocator = data.allocator,
+                .store = data.store,
+                .path = path,
+            }) catch {};
+        }
+    }
+
+    const FSClosureCallbackContainer = struct {
+        allocator: Allocator,
+        store: Store,
+        paths: *ArrayList(StorePath),
+    };
+
     export fn realiseCallback(user_data: ?*anyopaque, out_name: [*c]const u8, out: ?*const libnix.StorePath) callconv(.c) void {
-        const data: *StorePath.RealisedPathContainer = @ptrCast(@alignCast(user_data.?));
+        const data: *RealisedPathContainer = @ptrCast(@alignCast(user_data.?));
 
         data.name = data.allocator.dupe(u8, mem.sliceTo(mem.span(out_name), 0)) catch null;
         data.out_path = out;
@@ -226,14 +310,14 @@ pub const StorePath = struct {
         self: Self,
         context: *NixContext,
     ) !RealisedPath {
-        var container = StorePath.RealisedPathContainer{
+        var container = RealisedPathContainer{
             .name = null,
             .out_path = null,
             .allocator = self.allocator,
         };
         errdefer container.deinit();
 
-        const err = libnix.nix_store_realise(context.context, self.store.store, self.path, &container, StorePath.realiseCallback);
+        const err = libnix.nix_store_realise(context.context, self.store.store, self.path, &container, realiseCallback);
         if (err != 0) return nixError(err);
 
         const cloned_path = libnix.nix_store_path_clone(container.out_path.?) orelse return error.OutOfMemory;
@@ -316,5 +400,40 @@ pub const Derivation = struct {
     // Deallocate this derivation. Does not fail.
     pub fn deinit(self: Self) void {
         libnix.nix_derivation_free(self.drv);
+    }
+};
+
+/// A Nix closure iterator.
+///
+/// NOTE: In the future, if Nix exposes a streaming API for getting the
+/// closure for a particular store path, then this will use that,
+/// but currently the paths are all fetched eagerly, and this is
+/// an iterator over those already-computed store paths.
+const ClosureIterator = struct {
+    allocator: Allocator,
+    paths: []StorePath,
+    index: usize = 0,
+
+    /// Move to the next path in the closure, if it exists.
+    ///
+    /// If no more paths are needed, then null is returned.
+    ///
+    /// Do NOT call `deinit()` on these store paths; this will
+    /// be handled by the `ClosureIterator.deinit()` method.
+    pub fn next(self: *ClosureIterator) ?StorePath {
+        if (self.index >= self.paths.len) {
+            return null;
+        }
+        defer self.index += 1;
+        return self.paths[self.index];
+    }
+
+    /// Deallocate this ClosureIterator and all store paths
+    /// associated with it. Does not fail.
+    pub fn deinit(self: *ClosureIterator) void {
+        for (self.paths) |path| {
+            path.deinit();
+        }
+        self.allocator.free(self.paths);
     }
 };
