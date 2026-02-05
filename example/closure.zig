@@ -19,6 +19,8 @@ pub fn main() !u8 {
     const context = try zignix.NixContext.init(allocator);
     defer context.deinit();
 
+    try zignix.util.setVerbosity(context, .vomit);
+
     zignix.init(context) catch {
         const msg = context.errorMessage() catch "(failed to retrieve error message from context)";
         print("error: failed to initialize nix lib: {s}", .{msg.?});

@@ -35,6 +35,7 @@ pub fn init(context: *NixContext) NixError!void {
     if (err != 0) return nixError(err);
 }
 
+/// A Nix evaluator state.
 pub const EvalState = struct {
     state: *libnix.EvalState,
     store: Store,
@@ -210,6 +211,10 @@ const AttrKeyValue = struct {
     value: Value,
 };
 
+// An instance of a Nix value.
+//
+// Only initialize a value of this type once;
+// otherwise, undefine behavior happens.
 pub const Value = struct {
     value: *libnix.Value,
     state: EvalState,
@@ -449,6 +454,12 @@ pub const Value = struct {
         if (err != 0) return nixError(err);
     }
 
+    /// Call a Nix function with a list of arguments,
+    ///
+    /// and receive a new value with the evaluated result back.
+    ///
+    /// Caller owns returned memory, and must release resources
+    /// with `.deinit()` afterward.
     pub fn call(self: Self, context: *NixContext, args: []const Value) !Value {
         if (args.len < 1) {
             @panic("no arguments provided when calling nix value as a function");
@@ -486,7 +497,8 @@ pub const Value = struct {
 
     /// Realise a string context.
     ///
-    /// Caller must deinitialize memory with `.deinit()` afterwards.
+    /// Caller owns returned memory, and must release resources
+    /// with `.deinit()` afterwards.
     pub fn realiseString(self: Self, context: *NixContext, is_ifd: bool) !RealisedString {
         const realised_string = libnix.nix_string_realise(context.context, self.state.state, self.value, is_ifd);
         if (realised_string == null) return error.Failed;
@@ -498,6 +510,10 @@ pub const Value = struct {
         };
     }
 
+    /// Force the evaluation of a lazy Nix value.
+    ///
+    /// Forcing evaluation can either be shallow (one level only)
+    /// or deep (recursive).
     pub fn forceEval(self: Self, context: *NixContext, deep: bool) !void {
         const err = if (deep)
             libnix.nix_value_force_deep(context.context, self.state.state, self.value)
@@ -537,6 +553,7 @@ pub const gc = struct {
     }
 };
 
+/// Intermediate builder for initializing a Nix list value.
 pub const ListBuilder = struct {
     builder: *libnix.ListBuilder,
 
@@ -567,6 +584,7 @@ pub const ListBuilder = struct {
     }
 };
 
+/// Intermediate builder for initializing a Nix attribute set value.
 pub const BindingsBuilder = struct {
     builder: *libnix.BindingsBuilder,
     allocator: Allocator,
@@ -602,6 +620,7 @@ pub const BindingsBuilder = struct {
     }
 };
 
+/// Iterator over a Nix list value's elements.
 pub const ListIterator = struct {
     list: Value,
     size: usize,
@@ -623,6 +642,7 @@ pub const ListIterator = struct {
     }
 };
 
+/// Iterator over a Nix attrset value's key-value pairs.
 pub const AttrsetIterator = struct {
     attrset: Value,
     size: usize,
@@ -645,6 +665,7 @@ pub const AttrsetIterator = struct {
     }
 };
 
+/// A realised string context.
 pub const RealisedString = struct {
     string: *libnix.nix_realised_string,
     state: EvalState,
@@ -682,6 +703,8 @@ pub const RealisedString = struct {
     }
 };
 
+// An iterator over a set of realised store paths
+// for a string context.
 pub const RealisedStringIterator = struct {
     string: *libnix.nix_realised_string,
     i: usize = 0,

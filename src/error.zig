@@ -1,5 +1,6 @@
 const libnix = @import("c.zig").libnix;
 
+/// Possible set of errors that the Nix library can return.
 pub const NixError = error{
     Unknown,
     Overflow,

@@ -32,6 +32,7 @@ pub fn initPlugins(context: *NixContext) NixError!void {
     if (err != 0) return nixError(err);
 }
 
+/// Reference to a Nix store instance.
 pub const Store = struct {
     store: *libnix.Store,
     allocator: Allocator,
@@ -111,6 +112,8 @@ pub const Store = struct {
         };
     }
 
+    /// Copy the closure of path from from this store
+    /// to the provided destination store.
     pub fn copyClosure(self: Self, context: *NixContext, dest: Store, path: StorePath) !void {
         if (self.store != path.store.store) {
             @panic("passed StorePath did not come from this store");
@@ -126,8 +129,13 @@ pub const Store = struct {
     }
 };
 
+/// A realised path output.
+///
+/// Call `.deinit()` to release resources.
 pub const RealisedPath = struct {
+    /// Name of the realised path
     name: []const u8,
+    /// Store path instance for the output
     out: StorePath,
     allocator: Allocator,
 
@@ -139,6 +147,9 @@ pub const RealisedPath = struct {
     }
 };
 
+/// A store path instance associated with a particular Nix store.
+///
+/// Call `.deinit()` to release resources.
 pub const StorePath = struct {
     path: *libnix.StorePath,
     store: Store,
@@ -146,9 +157,9 @@ pub const StorePath = struct {
 
     const Self = @This();
 
-    // Get the path name (e.g. "name" in /nix/store/...-name).
-    //
-    // Caller owns returned memory.
+    /// Get the path name (e.g. "name" in /nix/store/...-name).
+    ///
+    /// Caller owns returned memory.
     pub fn name(self: Self) ![]const u8 {
         var string_data = c.StringDataContainer.new(self.allocator);
 
@@ -178,10 +189,10 @@ pub const StorePath = struct {
         return valid;
     }
 
-    // Copy a StorePath value.
-    //
-    // Caller owns returned memory and must call `deinit()`
-    // to release held memory.
+    /// Copy a StorePath value and create a new instance.
+    ///
+    /// Caller owns returned memory and must call `deinit()`
+    /// to release held memory.
     pub fn clone(self: Self) !Self {
         const cloned_value = libnix.nix_store_path_clone(self.path);
         return Self{
@@ -191,6 +202,9 @@ pub const StorePath = struct {
         };
     }
 
+    /// Retrieve the derivation associated with the store path.
+    ///
+    /// Caller must call `.deinit()` to release owned memory.
     pub fn getDrv(self: Self, context: NixContext) !Derivation {
         const drv = libnix.nix_store_drv_from_store_path(context.context, self.store.store, self.path) orelse return error.OutOfMemory;
 
@@ -339,21 +353,22 @@ pub const StorePath = struct {
     }
 };
 
+/// An instantiation of a Nix derivation.
 pub const Derivation = struct {
     drv: *libnix.nix_derivation,
     allocator: Allocator,
 
     const Self = @This();
 
-    // Create a Nix derivation from a JSON-formatted representation
-    // of that derivation.
-    //
-    // Unlike toJSON(), this needs a Store. This is because over time,
-    // we expect the internal representation of derivations in Nix to
-    // differ from accepted derivation formats.
-    //
-    // The store argument is here to help any logic needed to convert
-    // from JSON to the internal representation, in excess of just parsing.
+    /// Create a Nix derivation from a JSON-formatted representation
+    /// of that derivation.
+    ///
+    /// Unlike toJSON(), this needs a Store. This is because over time,
+    /// we expect the internal representation of derivations in Nix to
+    /// differ from accepted derivation formats.
+    ///
+    /// The store argument is here to help any logic needed to convert
+    /// from JSON to the internal representation, in excess of just parsing.
     pub fn fromJSON(allocator: Allocator, context: *NixContext, store: *Store, input: []const u8) !Self {
         const inputZ = try allocator.dupeZ(u8, input);
         defer allocator.free(inputZ);
@@ -369,9 +384,9 @@ pub const Derivation = struct {
         };
     }
 
-    // Add the given derivation to the provided Nix store.
-    //
-    // Returns the added store path, or an error on failure.
+    /// Add the given derivation to the provided Nix store.
+    ///
+    /// Returns the added store path, or an error on failure.
     pub fn addToStore(self: Self, context: *NixContext, store: *Store) !StorePath {
         const path = libnix.nix_add_derivation(context.context, store.store, self.drv) orelse {
             try context.errorCode();
@@ -385,9 +400,9 @@ pub const Derivation = struct {
         };
     }
 
-    // Serialize this derivation as a JSON-formatted representation.
-    //
-    // Caller owns returned memory.
+    /// Serialize this derivation as a JSON-formatted representation.
+    ///
+    /// Caller owns returned memory.
     pub fn toJSON(self: Self, context: *NixContext) ![]const u8 {
         var string_data = c.StringDataContainer.new(self.allocator);
 
@@ -397,7 +412,7 @@ pub const Derivation = struct {
         return string_data.result orelse Allocator.Error.OutOfMemory;
     }
 
-    // Deallocate this derivation. Does not fail.
+    /// Deallocate this derivation. Does not fail.
     pub fn deinit(self: Self) void {
         libnix.nix_derivation_free(self.drv);
     }

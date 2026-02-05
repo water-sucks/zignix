@@ -59,6 +59,7 @@ const VerbosityLevel = enum(u8) {
     vomit,
 };
 
+/// Set the verbosity level of Nix logging.
 pub fn setVerbosity(context: *NixContext, level: VerbosityLevel) NixError!void {
     const err = libnix.nix_set_verbosity(context.context, @intFromEnum(level));
     if (err != 0) return nixError(err);
